@@ -57,15 +57,38 @@ body {
 
 /* --- Header / Search --- */
 .glass-header {
-    padding: 16px var(--sidebar-padding);
+    padding: 16px;
     background: var(--glass-bg);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border-color);
     position: sticky;
     top: 0;
-    z-index: 10;
-    border-bottom: 1px solid transparent;
-    /* Can add border if needed */
+    z-index: 100;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+    gap: 8px;
+}
+
+.brand-logo {
+    width: 24px;
+    height: 24px;
+    filter: drop-shadow(0 2px 4px rgba(16, 185, 129, 0.2));
+}
+
+.header-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 0;
+    letter-spacing: -0.01em;
+    background: linear-gradient(135deg, var(--text-primary) 0%, var(--text-secondary) 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
 
 .search-container {

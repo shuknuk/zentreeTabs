@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
+  <!-- Main Trunk/Stem -->
+  <path d="M24 6V42" stroke="#10b981" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Right Branches -->
+  <path d="M24 14L34 20" stroke="#10b981" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M24 26L34 32" stroke="#10b981" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Left Branches -->
+  <path d="M24 20L14 26" stroke="#34d399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M24 32L14 38" stroke="#34d399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Top Node -->
+  <circle cx="24" cy="6" r="3" fill="#059669"/>
+  <!-- Leaf Nodes -->
+  <circle cx="34" cy="20" r="3" fill="#34d399"/>
+  <circle cx="14" cy="26" r="3" fill="#6ee7b7"/>
+  <circle cx="34" cy="32" r="3" fill="#34d399"/>
+  <circle cx="14" cy="38" r="3" fill="#6ee7b7"/>
+</svg>
