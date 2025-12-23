@@ -207,9 +207,8 @@ body {
 
 .group-body {
     border-left: 2px solid var(--group-color);
-    margin-left: 14px;
-    /* Align with padding + half dot */
-    padding-left: 0px;
+    /* margin-left: 14px; removed */
+    /* padding-left: 0px; */
 }
 
 .group-body.collapsed {
@@ -229,6 +228,8 @@ body {
     transition: background-color var(--transition-speed) ease;
     user-select: none;
     position: relative;
+    overflow: hidden;
+    /* Prevent expansion */
 }
 
 .tab-item:hover {
@@ -269,6 +270,8 @@ body {
     text-overflow: ellipsis;
     flex-grow: 1;
     line-height: 1.4;
+    min-width: 0;
+    /* Critical for flexbox ellipsis */
 }
 
 .rename-input {
@@ -295,6 +298,8 @@ body {
     margin-left: 4px;
     color: var(--text-secondary);
     transition: all 0.1s ease;
+    flex-shrink: 0;
+    /* Keep size constant */
 }
 
 .tab-item:hover .close-btn {
@@ -313,11 +318,9 @@ body {
 }
 
 .tab-children {
-    margin-left: 10px;
-    /* Indentation */
-    border-left: 1px solid var(--border-color);
-    /* Subtle guide line */
-    padding-left: 4px;
+    /* margin-left: 10px; removed for JS depth */
+    /* border-left: 1px solid var(--border-color); removed for now as it conflicts with full width highlight */
+    /* padding-left: 4px; removed */
     transition: max-height 0.3s ease;
     overflow: hidden;
 }
@@ -337,6 +340,8 @@ body {
     color: var(--text-secondary);
     transition: transform 0.2s ease;
     border-radius: 4px;
+    flex-shrink: 0;
+    /* Keep size constant */
 }
 
 .expand-arrow:hover {

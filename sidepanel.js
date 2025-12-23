@@ -289,7 +289,7 @@ function createGroupNode(group, bucketTabIds) {
     // For now, simple display:none via class is fine for performance unless 1000s of tabs.
     if (!group.collapsed) {
         bucketTabIds.forEach(tabId => {
-            body.appendChild(createTabNode(tabId));
+            body.appendChild(createTabNode(tabId, 1)); // Start at depth 1 inside group
         });
     }
 
@@ -312,7 +312,7 @@ function mapColor(chromeColor) {
     return colors[chromeColor] || '#bdc1c6';
 }
 
-function createTabNode(tabId) {
+function createTabNode(tabId, depth = 0) {
     const tab = tabsMap.get(tabId);
     if (!tab) return document.createElement('div');
 
@@ -326,6 +326,9 @@ function createTabNode(tabId) {
     row.className = `tab-item ${tab.active ? 'active' : ''} ${hasChildren ? 'group-root' : ''}`;
     row.draggable = true;
 
+    // Indentation Logic (10px base padding + 16px per depth level)
+    row.style.paddingLeft = (10 + (depth * 16)) + 'px';
+
     // Drag Events
     row.addEventListener('dragstart', handleDragStart);
     row.addEventListener('dragover', handleDragOver);
@@ -336,7 +339,6 @@ function createTabNode(tabId) {
     });
 
     // 2. Expand/Collapse Arrow
-    // const hasChildren = tab.children && tab.children.length > 0; // Already defined above
     const arrow = document.createElement('div');
     arrow.className = `expand-arrow ${hasChildren ? '' : 'hidden'}`;
     // Initialize rotation based on collapsed state
@@ -420,7 +422,7 @@ function createTabNode(tabId) {
         childrenContainer.className = `tab-children ${isCollapsed ? 'collapsed' : ''}`;
 
         tab.children.forEach(childId => {
-            const childNode = createTabNode(childId);
+            const childNode = createTabNode(childId, depth + 1);
             childrenContainer.appendChild(childNode);
         });
         container.appendChild(childrenContainer);
