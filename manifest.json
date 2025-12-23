@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "ZenTree Tabs",
+  "version": "1.0",
+  "description": "A vertical tree-style tab manager with a modern, Arc-inspired aesthetic.",
+  "permissions": [
+    "sidePanel",
+    "tabs",
+    "tabGroups",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open ZenTree Tabs"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "icons": {
+    "16": "images/icon-16.png",
+    "48": "images/icon-48.png",
+    "128": "images/icon-128.png"
+  }
+}

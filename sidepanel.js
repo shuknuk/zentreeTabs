@@ -1,0 +1,490 @@
+/**
+ * ZenTree Tabs - Side Panel Logic
+ * Handles tab rendering, tree structure, events, and drag-and-drop.
+ */
+
+// --- State ---
+let tabsMap = new Map(); // tabId -> tab object
+let rootTabs = []; // Array of tabIds that are roots
+let collapsedState = new Set(); // Set of tabIds whose children are hidden
+let parentOverrides = new Map(); // childId -> parentId
+
+const tabsListEl = document.getElementById('tabs-list');
+const searchInput = document.getElementById('tab-search');
+const newTabBtn = document.getElementById('new-tab-btn');
+
+// --- Initialization ---
+
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        await loadCollapsedState();
+        await loadParentOverrides();
+        await fetchAndRenderTabs();
+    } catch (err) {
+        console.error("ZenTree Init Error:", err);
+        document.body.innerHTML = `<div style="padding:20px; color:red;">Error loading ZenTree:<br>${err.message}</div>`;
+    }
+
+    // Key Tab Listeners
+    chrome.tabs.onCreated.addListener(onTabCreated);
+    chrome.tabs.onUpdated.addListener(onTabUpdated);
+    chrome.tabs.onRemoved.addListener(onTabRemoved);
+    chrome.tabs.onActivated.addListener(onTabActivated);
+    chrome.tabs.onMoved.addListener(onTabMoved);
+
+    // UI Listeners
+    newTabBtn.addEventListener('click', () => chrome.tabs.create({}));
+    searchInput.addEventListener('input', handleSearch);
+});
+
+// --- Core Data Fetching ---
+
+async function fetchAndRenderTabs() {
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+
+    // Fetch all groups in current window
+    const groups = await chrome.tabGroups.query({ windowId: chrome.windows.WINDOW_ID_CURRENT });
+    const groupsMap = new Map();
+    groups.forEach(g => groupsMap.set(g.id, g));
+
+    buildTree(tabs, groupsMap);
+    renderTree(groupsMap);
+}
+
+/**
+ * Builds the tree structure from a flat list of tabs.
+ * Uses openerTabId to determine hierarchy.
+ */
+/**
+ * Builds the tree structure.
+ * Structure:
+ * - rootTabs (Tabs with no parent AND no group)
+ * - groupBuckets (Map<groupId, Array<tabId>>) -> Logic: Group acts as a root, Tree inside Group.
+ */
+let groupBuckets = new Map(); // groupId -> Array<rootTabIds inside group>
+
+function buildTree(tabs, groupsMap) {
+    tabsMap.clear();
+    groupBuckets.clear();
+    rootTabs = [];
+
+    // Initialize buckets for known groups
+    for (const groupId of groupsMap.keys()) {
+        groupBuckets.set(groupId, []);
+    }
+
+    // First pass: Index tabs
+    tabs.forEach(tab => tabsMap.set(tab.id, { ...tab, children: [] }));
+
+    // Second pass: Build parent-child relationships
+    // Note: If a child is in a different group than parent, visual hierarchy breaks visually.
+    // For specific requirement: "Grouped" tabs show in panel.
+    // We will enforce: If in a Group, display in that Group.
+    // Inside the group, we try to nesting if standard logic applies AND both are in same group.
+
+    tabs.forEach(tab => {
+        const inGroup = tab.groupId !== -1;
+
+        let parentId = parentOverrides.get(tab.id) || tab.openerTabId;
+        let placed = false;
+
+        // Try to nest under a parent
+        if (parentId && tabsMap.has(parentId)) {
+            const parent = tabsMap.get(parentId);
+
+            // Allow nesting ONLY if:
+            // 1. Both are in SAME group
+            // 2. OR Both are NOT in a group
+            // If they are split across groups, we don't nest visually to avoid confused UI.
+            if (parent.groupId === tab.groupId) {
+                // Basic cycle prevention
+                const parentsParentId = parentOverrides.get(parentId) || parent.openerTabId;
+                if (parentsParentId !== tab.id) {
+                    parent.children.push(tab.id);
+                    placed = true;
+                }
+            }
+        }
+
+        if (!placed) {
+            // Is it in a group?
+            if (inGroup) {
+                if (!groupBuckets.has(tab.groupId)) {
+                    groupBuckets.set(tab.groupId, []); // Should exist from init but just in case
+                }
+                groupBuckets.get(tab.groupId).push(tab.id);
+            } else {
+                // Root of the main list
+                rootTabs.push(tab.id);
+            }
+        }
+    });
+
+    // Sort roots & buckets
+    const sortFn = (a, b) => tabsMap.get(a).index - tabsMap.get(b).index;
+    rootTabs.sort(sortFn);
+
+    for (const [gid, roots] of groupBuckets) {
+        roots.sort(sortFn);
+    }
+}
+
+
+// --- Rendering ---
+
+// --- Rendering ---
+
+function renderTree(groupsMap) {
+    tabsListEl.innerHTML = '';
+
+    // Filtered mode? (If searching)
+    const filterText = searchInput ? searchInput.value : '';
+    if (filterText) {
+        renderFilteredList(filterText);
+        return;
+    }
+
+    // 1. We need to respect the visual order of items (Groups vs Tabs mixed)
+    // Chrome tabs have an 'index'. Groups don't have a single index, but they span a range.
+    // For simplicity: We can iterate through 'Root Tabs' and 'Groups' by finding their min-index.
+
+    const elements = [];
+
+    // Add individual Root Tabs
+    rootTabs.forEach(tabId => {
+        elements.push({
+            type: 'tab',
+            index: tabsMap.get(tabId).index,
+            id: tabId
+        });
+    });
+
+    // Add Groups
+    if (groupsMap) {
+        for (const [groupId, group] of groupsMap) {
+            // Use the group's first tab index effectively? 
+            // Chrome.tabGroups doesn't give 'index'. It relies on tabs.
+            // We can assume group connects to its tabs.
+            // We take the index of the first tab in the bucket (if any)
+            const bucket = groupBuckets.get(groupId);
+            if (bucket && bucket.length > 0) {
+                const firstTab = tabsMap.get(bucket[0]);
+                elements.push({
+                    type: 'group',
+                    index: firstTab ? firstTab.index : 9999, // Fallback
+                    id: groupId,
+                    group: group,
+                    children: bucket
+                });
+            }
+        }
+    }
+
+    // Sort all by visual index
+    elements.sort((a, b) => a.index - b.index);
+
+    // Render
+    elements.forEach(el => {
+        if (el.type === 'tab') {
+            tabsListEl.appendChild(createTabNode(el.id));
+        } else {
+            tabsListEl.appendChild(createGroupNode(el.group, el.children));
+        }
+    });
+}
+
+function createGroupNode(group, bucketTabIds) {
+    const container = document.createElement('div');
+    container.className = 'group-node';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'group-header';
+    header.style.setProperty('--group-color', mapColor(group.color));
+
+    // Click to Toggle Native Group
+    header.addEventListener('click', async () => {
+        try {
+            await chrome.tabGroups.update(group.id, { collapsed: !group.collapsed });
+            // The listener onUpdated will re-render
+        } catch (e) {
+            console.error("Failed to toggle group", e);
+        }
+    });
+
+    // Expand Arrow
+    const arrow = document.createElement('div');
+    arrow.className = `expand-arrow ${group.collapsed ? '' : 'rotated'}`; // rotated = expanded
+    arrow.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+    header.appendChild(arrow);
+
+    // Colors dot or line
+    const dot = document.createElement('div');
+    dot.className = 'group-dot';
+    header.appendChild(dot);
+
+    const title = document.createElement('span');
+    title.className = 'group-title';
+    title.textContent = group.title || 'Untitled Group';
+    header.appendChild(title);
+
+    container.appendChild(header);
+
+    // Body
+    const body = document.createElement('div');
+    body.className = `group-body ${group.collapsed ? 'collapsed' : ''}`;
+
+    // Optimization: If collapsed, maybe don't even create children DOM?
+    // For now, simple display:none via class is fine for performance unless 1000s of tabs.
+    if (!group.collapsed) {
+        bucketTabIds.forEach(tabId => {
+            body.appendChild(createTabNode(tabId));
+        });
+    }
+
+    container.appendChild(body);
+    return container;
+}
+
+function mapColor(chromeColor) {
+    const colors = {
+        grey: '#bdc1c6',
+        blue: '#8ab4f8',
+        red: '#f28b82',
+        yellow: '#fdd663',
+        green: '#81c995',
+        pink: '#ff8bcb',
+        purple: '#c58af9',
+        cyan: '#78d9ec',
+        orange: '#fcad70'
+    };
+    return colors[chromeColor] || '#bdc1c6';
+}
+
+function createTabNode(tabId) {
+    const tab = tabsMap.get(tabId);
+    if (!tab) return document.createElement('div');
+
+    const container = document.createElement('div');
+    container.className = 'tab-tree-node';
+    container.dataset.tabId = tabId;
+
+    // 1. Remote Tab Item (The visible row)
+    const hasChildren = tab.children && tab.children.length > 0;
+    const row = document.createElement('div');
+    row.className = `tab-item ${tab.active ? 'active' : ''} ${hasChildren ? 'group-root' : ''}`;
+    row.draggable = true;
+
+    // Drag Events
+    row.addEventListener('dragstart', handleDragStart);
+    row.addEventListener('dragover', handleDragOver);
+    row.addEventListener('drop', handleDrop);
+    row.addEventListener('dragend', handleDragEnd);
+    row.addEventListener('click', (e) => {
+        chrome.tabs.update(tabId, { active: true });
+    });
+
+    // 2. Expand/Collapse Arrow
+    // const hasChildren = tab.children && tab.children.length > 0; // Already defined above
+    const arrow = document.createElement('div');
+    arrow.className = `expand-arrow ${hasChildren ? '' : 'hidden'}`;
+    // Initialize rotation based on collapsed state
+    const isCollapsed = collapsedState.has(tabId);
+    if (!isCollapsed && hasChildren) {
+        arrow.classList.add('rotated'); // Rotated means expanded (down)
+    }
+
+    arrow.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+
+    arrow.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleCollapse(tabId);
+    });
+    row.appendChild(arrow);
+
+    // 3. Favicon
+    const favicon = document.createElement('img');
+    favicon.className = 'tab-favicon';
+    favicon.src = tab.favIconUrl || 'icons/default-favicon.png'; // Handled via fallback usually
+    favicon.onerror = () => { favicon.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="%23ccc"><rect width="16" height="16" rx="2"/></svg>'; };
+    row.appendChild(favicon);
+
+    // 4. Title
+    const title = document.createElement('span');
+    title.className = 'tab-title';
+    title.textContent = tab.title;
+    row.appendChild(title);
+
+    // 5. Close Button
+    const closeBtn = document.createElement('div');
+    closeBtn.className = 'close-btn';
+    closeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+    closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // Prevent activation
+        chrome.tabs.remove(tabId);
+    });
+    row.appendChild(closeBtn);
+
+    container.appendChild(row);
+
+    // 6. Children Container
+    if (hasChildren) {
+        const childrenContainer = document.createElement('div');
+        childrenContainer.className = `tab-children ${isCollapsed ? 'collapsed' : ''}`;
+
+        tab.children.forEach(childId => {
+            const childNode = createTabNode(childId);
+            childrenContainer.appendChild(childNode);
+        });
+        container.appendChild(childrenContainer);
+    }
+
+    return container;
+}
+
+function renderFilteredList(text) {
+    const term = text.toLowerCase();
+    for (let [id, tab] of tabsMap) {
+        if (tab.title.toLowerCase().includes(term) || tab.url.toLowerCase().includes(term)) {
+            // Render simplified node (no children/indentation for search results)
+            // Or render logic to show path. For simplicity, flat list:
+            const row = createTabNode(id); // Reusing usage, but children might look weird
+            // To properly handle flat search, we might hide children styling
+            tabsListEl.appendChild(row);
+        }
+    }
+}
+
+// --- Logic ---
+
+async function toggleCollapse(tabId) {
+    if (collapsedState.has(tabId)) {
+        collapsedState.delete(tabId);
+    } else {
+        collapsedState.add(tabId);
+    }
+    await saveCollapsedState();
+    fetchAndRenderTabs(); // Re-render to update UI
+}
+
+function handleSearch(e) {
+    const val = e.target.value;
+    renderTree(val);
+}
+
+// --- Event Handlers ---
+// For group updates
+chrome.tabGroups.onUpdated.addListener(scheduleRender);
+chrome.tabGroups.onCreated.addListener(scheduleRender);
+chrome.tabGroups.onRemoved.addListener(scheduleRender);
+chrome.tabGroups.onMoved.addListener(scheduleRender);
+
+// Debounce rendering to avoid flickering on rapid updates
+let renderTimeout;
+function scheduleRender() {
+    if (renderTimeout) clearTimeout(renderTimeout);
+    renderTimeout = setTimeout(() => {
+        fetchAndRenderTabs();
+    }, 50); // Small buffer
+}
+
+function onTabCreated() { scheduleRender(); }
+function onTabUpdated() { scheduleRender(); }
+function onTabRemoved() { scheduleRender(); }
+function onTabActivated() { scheduleRender(); }
+function onTabMoved() { scheduleRender(); }
+
+// --- Persistence ---
+
+async function loadCollapsedState() {
+    const res = await chrome.storage.local.get('collapsedState');
+    if (res.collapsedState) {
+        collapsedState = new Set(res.collapsedState);
+    }
+}
+
+async function saveCollapsedState() {
+    await chrome.storage.local.set({
+        collapsedState: Array.from(collapsedState)
+    });
+}
+
+// --- Drag & Drop (Native HTML5) ---
+
+let draggedTabId = null;
+
+function handleDragStart(e) {
+    draggedTabId = Number(this.parentNode.dataset.tabId); // parentNode is .tab-tree-node
+    this.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+}
+
+function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    this.classList.add('drag-over');
+}
+
+function handleDragEnd(e) {
+    this.classList.remove('dragging');
+    document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('drag-over'));
+    draggedTabId = null;
+}
+
+function handleDrop(e) {
+    e.stopPropagation();
+    const targetTabId = Number(this.parentNode.dataset.tabId);
+
+    if (draggedTabId && targetTabId && draggedTabId !== targetTabId) {
+        // Simple logic for now: Nest dropped tab under target tab
+        // To Un-nest, we would need dropped on "between" zones which is harder.
+        // For 'ZenTree', let's assume dropping ON a tab means "Make me a child of this tab".
+
+        // However, we rely on duplicate openerTabId logic?
+        // Chrome doesn't let us easily "set" openerTabId after creation.
+        // Wait, Chrome doesn't expose a setter for `openerTabId` easily in extension API for existing tabs?
+        // Actually, hierarchy is purely internal to *our* extension if we want to change it freely,
+        // OR we try to keep it synced.
+        // But the prompt asked for "Tree Hierarchy: Tabs opened from a 'parent' tab...", implying native structure.
+        // But for Drag & Drop to work meaningfully, we usually need to store our own tree structure
+        // OR manipulate the specialized index.
+
+        // Since we are using "openerTabId" for the tree logic in buildTree(), we can't easily change it physically.
+        // BUT, complex tree style tabs extensions maintain their own internal map of parent-child relationships.
+        // To verify request: "Tech Stack: Pure HTML... no heavy frameworks".
+        // Let's implement a 'soft' hierarchy override. If we drag A onto B, we store "A is child of B" in local storage
+        // and prefer that over openerTabId.
+
+        nestTab(draggedTabId, targetTabId);
+    }
+
+    return false;
+}
+
+// Hierarchy Override for Drag & Drop
+
+async function loadParentOverrides() {
+    const res = await chrome.storage.local.get('parentOverrides');
+    if (res.parentOverrides) {
+        parentOverrides = new Map(Object.entries(res.parentOverrides).map(([k, v]) => [Number(k), v]));
+    }
+}
+
+async function nestTab(childId, parentId) {
+    // Prevent cycles (simple check)
+    if (childId === parentId) return;
+
+    // Check if parent is descendant of child (prevent disappearing)
+    // For simplicity in this prompt, doing single level check or relying on re-render.
+
+    // Store override
+    await loadParentOverrides(); // ensure fresh
+    parentOverrides.set(childId, parentId);
+    await chrome.storage.local.set({
+        parentOverrides: Object.fromEntries(parentOverrides)
+    });
+
+    fetchAndRenderTabs();
+}
+
+// ... (End of file, removed syncGroups) ...
