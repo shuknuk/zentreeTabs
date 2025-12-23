@@ -6,8 +6,10 @@
 // --- State ---
 let tabsMap = new Map(); // tabId -> tab object
 let rootTabs = []; // Array of tabIds that are roots
+
 let collapsedState = new Set(); // Set of tabIds whose children are hidden
 let parentOverrides = new Map(); // childId -> parentId
+let customTitles = new Map(); // tabId -> String
 
 const tabsListEl = document.getElementById('tabs-list');
 const searchInput = document.getElementById('tab-search');
@@ -19,6 +21,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
         await loadCollapsedState();
         await loadParentOverrides();
+        await loadCustomTitles();
         await fetchAndRenderTabs();
     } catch (err) {
         console.error("ZenTree Init Error:", err);
@@ -312,7 +315,43 @@ function createTabNode(tabId) {
     // 4. Title
     const title = document.createElement('span');
     title.className = 'tab-title';
-    title.textContent = tab.title;
+    title.textContent = customTitles.get(tabId) || tab.title;
+    title.title = "Double-click to rename"; // Tooltip hint
+
+    // Rename Logic
+    title.ondblclick = (e) => {
+        e.stopPropagation();
+        const currentName = title.textContent;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = currentName;
+        input.className = 'rename-input';
+
+        const commit = async () => {
+            if (input.value && input.value !== tab.title) {
+                customTitles.set(tabId, input.value);
+            } else {
+                customTitles.delete(tabId); // Revert to original if empty or same
+            }
+            await saveCustomTitles();
+            fetchAndRenderTabs();
+        };
+
+        input.onblur = commit;
+        input.onkeydown = (ev) => {
+            if (ev.key === 'Enter') {
+                input.blur();
+            }
+            if (ev.key === 'Escape') {
+                fetchAndRenderTabs(); // Cancel
+            }
+        };
+
+        title.replaceWith(input);
+        input.focus();
+        input.select();
+    };
+
     row.appendChild(title);
 
     // 5. Close Button
@@ -406,6 +445,20 @@ async function loadCollapsedState() {
 async function saveCollapsedState() {
     await chrome.storage.local.set({
         collapsedState: Array.from(collapsedState)
+    });
+}
+
+async function loadCustomTitles() {
+    const res = await chrome.storage.local.get('customTitles');
+    if (res.customTitles) {
+        // Convert object back to map. Keys stored as strings in JSON.
+        customTitles = new Map(Object.entries(res.customTitles).map(([k, v]) => [Number(k), v]));
+    }
+}
+
+async function saveCustomTitles() {
+    await chrome.storage.local.set({
+        customTitles: Object.fromEntries(customTitles)
     });
 }
 

@@ -219,6 +219,19 @@ body {
     line-height: 1.4;
 }
 
+.rename-input {
+    flex-grow: 1;
+    font-size: 13px;
+    border: 1px solid var(--accent-color);
+    border-radius: 4px;
+    padding: 2px 4px;
+    outline: none;
+    font-family: inherit;
+    background: var(--bg-color);
+    color: var(--text-primary);
+    min-width: 0;
+}
+
 .close-btn {
     opacity: 0;
     width: 20px;
