@@ -836,21 +836,146 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.bookmarks.onMoved.addListener(() => fetchAndRenderBookmarks());
     }
 
-    // Toggle Bookmarks Logic
-    const toggleBtn = document.getElementById('toggle-bookmarks-btn');
+    // Toggle Bookmarks/Downloads Logic
+    const toggleBookmarksBtn = document.getElementById('toggle-bookmarks-btn');
+    const toggleDownloadsBtn = document.getElementById('toggle-downloads-btn');
+
     const bookmarksSection = document.getElementById('bookmarks-section');
+    const downloadsSection = document.getElementById('downloads-section');
     const divider = document.querySelector('.section-divider');
 
     // Default to hidden
     if (bookmarksSection) bookmarksSection.classList.add('hidden');
+    if (downloadsSection) downloadsSection.classList.add('hidden');
     if (divider) divider.classList.add('hidden');
 
-    if (toggleBtn && bookmarksSection) {
-        toggleBtn.addEventListener('click', () => {
-            bookmarksSection.classList.toggle('hidden');
-            if (divider) divider.classList.toggle('hidden');
-            // Toggle active state on button if desired
-            toggleBtn.style.color = bookmarksSection.classList.contains('hidden') ? '' : 'var(--accent-color)';
-        });
+    function toggleSection(sectionName) {
+        const isBookmarks = sectionName === 'bookmarks';
+        const targetSection = isBookmarks ? bookmarksSection : downloadsSection;
+        const otherSection = isBookmarks ? downloadsSection : bookmarksSection;
+        const targetBtn = isBookmarks ? toggleBookmarksBtn : toggleDownloadsBtn;
+        const otherBtn = isBookmarks ? toggleDownloadsBtn : toggleBookmarksBtn;
+
+        if (!targetSection) return;
+
+        // If currently hidden, show it and hide other
+        if (targetSection.classList.contains('hidden')) {
+            targetSection.classList.remove('hidden');
+            if (otherSection) otherSection.classList.add('hidden');
+            if (divider) divider.classList.remove('hidden');
+
+            // Active states
+            targetBtn.style.color = 'var(--accent-color)';
+            if (otherBtn) otherBtn.style.color = '';
+
+            // Load data if opening
+            if (isBookmarks) {
+                fetchAndRenderBookmarks();
+            } else {
+                fetchAndRenderDownloads();
+            }
+        } else {
+            // Already open -> close it
+            targetSection.classList.add('hidden');
+            if (divider) divider.classList.add('hidden');
+            targetBtn.style.color = '';
+        }
     }
+
+    if (toggleBookmarksBtn) toggleBookmarksBtn.addEventListener('click', () => toggleSection('bookmarks'));
+    if (toggleDownloadsBtn) toggleDownloadsBtn.addEventListener('click', () => toggleSection('downloads'));
+
+    // Refresh listener for downloads
+    const refreshDlBtn = document.getElementById('refresh-downloads');
+    if (refreshDlBtn) refreshDlBtn.addEventListener('click', fetchAndRenderDownloads);
+
 });
+
+// --- Downloads Logic ---
+
+async function fetchAndRenderDownloads() {
+    const listEl = document.getElementById('downloads-list');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+
+    try {
+        const items = await chrome.downloads.search({ limit: 20, orderBy: ['-startTime'] });
+        items.forEach(item => {
+            listEl.appendChild(createDownloadNode(item));
+        });
+        if (items.length === 0) {
+            listEl.innerHTML = `<div style="padding:10px; color:var(--text-secondary); text-align:center;">No recent downloads</div>`;
+        }
+    } catch (err) {
+        console.error("Failed to load downloads", err);
+        listEl.innerHTML = `<div style="padding:10px; color:var(--text-secondary);">Error loading downloads.</div>`;
+    }
+}
+
+function createDownloadNode(item) {
+    const container = document.createElement('div');
+    container.className = 'download-item';
+
+    // File Icon (Generic)
+    const icon = document.createElement('div');
+    icon.className = 'download-icon';
+    icon.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
+    container.appendChild(icon);
+
+    // Info
+    const info = document.createElement('div');
+    info.className = 'download-info';
+
+    const name = document.createElement('div');
+    name.className = 'download-filename';
+    // chrome.downloads items have 'filename' (full path usually). extracting basename.
+    // If filename is empty (interrupted?), use id or status
+    const filename = item.filename ? item.filename.split(/[/\\]/).pop() : 'Unknown File';
+    name.textContent = filename;
+    info.appendChild(name);
+
+    const meta = document.createElement('div');
+    meta.className = 'download-meta';
+
+    // Status Dot
+    const dot = document.createElement('div');
+    dot.className = `status-dot status-${item.state}`;
+    meta.appendChild(dot);
+
+    // Size or Status text
+    let metaText = item.state;
+    if (item.state === 'complete' || item.state === 'in_progress') {
+        const size = formatBytes(item.fileSize || item.totalBytes);
+        metaText = size;
+    }
+    const metaSpan = document.createElement('span');
+    metaSpan.textContent = metaText;
+    meta.appendChild(metaSpan);
+
+    info.appendChild(meta);
+    container.appendChild(info);
+
+    // Click to Open
+    container.addEventListener('click', () => {
+        if (item.state === 'complete') {
+            chrome.downloads.open(item.id).catch(err => {
+                // Often fails if file is deleted. show in folder?
+                chrome.downloads.show(item.id);
+            });
+        } else {
+            // If active, maybe pause/resume? For now just show in folder
+            chrome.downloads.show(item.id);
+        }
+    });
+
+    return container;
+}
+
+function formatBytes(bytes, decimals = 1) {
+    if (!bytes) return '0 B';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}

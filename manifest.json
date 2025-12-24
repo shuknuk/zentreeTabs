@@ -9,7 +9,8 @@
     "tabGroups",
     "storage",
     "favicon",
-    "bookmarks"
+    "bookmarks",
+    "downloads"
   ],
   "background": {
     "service_worker": "background.js"
