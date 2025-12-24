@@ -644,48 +644,213 @@ function handleDragStart(e) {
     draggedTabId = Number(this.parentNode.dataset.tabId); // parentNode is .tab-tree-node
     this.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
+
+    // Optional: Set drag image to something cleaner if desired
 }
 
 function handleDragOver(e) {
-    e.preventDefault();
+    e.preventDefault(); // Essential to allow dropping
     e.dataTransfer.dropEffect = 'move';
-    this.classList.add('drag-over');
+
+    const targetTabId = Number(this.parentNode.dataset.tabId);
+    if (!draggedTabId || targetTabId === draggedTabId) return;
+
+    // Calculate Drop Zone
+    const rect = this.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const height = rect.height;
+
+    // Thresholds: Top 25%, Middle 50%, Bottom 25%
+    const zoneTop = height * 0.25;
+    const zoneBottom = height * 0.75;
+
+    // Clear previous classes
+    this.classList.remove('drop-above', 'drop-inside', 'drop-below');
+
+    if (y < zoneTop) {
+        this.classList.add('drop-above');
+    } else if (y > zoneBottom) {
+        this.classList.add('drop-below');
+    } else {
+        this.classList.add('drop-inside');
+    }
 }
 
 function handleDragEnd(e) {
     this.classList.remove('dragging');
-    document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('drag-over'));
+    document.querySelectorAll('.tab-item').forEach(el => {
+        el.classList.remove('drag-over', 'drop-above', 'drop-inside', 'drop-below');
+    });
     draggedTabId = null;
 }
 
-function handleDrop(e) {
+async function handleDrop(e) {
     e.stopPropagation();
+    e.preventDefault(); // Stop browser redirect
+
     const targetTabId = Number(this.parentNode.dataset.tabId);
 
-    if (draggedTabId && targetTabId && draggedTabId !== targetTabId) {
-        // Simple logic for now: Nest dropped tab under target tab
-        // To Un-nest, we would need dropped on "between" zones which is harder.
-        // For 'ZenTree', let's assume dropping ON a tab means "Make me a child of this tab".
+    // Cleanup visuals
+    this.classList.remove('drag-over', 'drop-above', 'drop-inside', 'drop-below');
 
-        // However, we rely on duplicate openerTabId logic?
-        // Chrome doesn't let us easily "set" openerTabId after creation.
-        // Wait, Chrome doesn't expose a setter for `openerTabId` easily in extension API for existing tabs?
-        // Actually, hierarchy is purely internal to *our* extension if we want to change it freely,
-        // OR we try to keep it synced.
-        // But the prompt asked for "Tree Hierarchy: Tabs opened from a 'parent' tab...", implying native structure.
-        // But for Drag & Drop to work meaningfully, we usually need to store our own tree structure
-        // OR manipulate the specialized index.
+    if (!draggedTabId || !targetTabId || draggedTabId === targetTabId) return;
 
-        // Since we are using "openerTabId" for the tree logic in buildTree(), we can't easily change it physically.
-        // BUT, complex tree style tabs extensions maintain their own internal map of parent-child relationships.
-        // To verify request: "Tech Stack: Pure HTML... no heavy frameworks".
-        // Let's implement a 'soft' hierarchy override. If we drag A onto B, we store "A is child of B" in local storage
-        // and prefer that over openerTabId.
+    // Determine Action based on mouse position (same logic as DragOver)
+    const rect = this.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const height = rect.height;
 
-        nestTab(draggedTabId, targetTabId);
+    const zoneTop = height * 0.25;
+    const zoneBottom = height * 0.75;
+
+    let action = 'nest'; // default
+    if (y < zoneTop) action = 'before';
+    else if (y > zoneBottom) action = 'after';
+
+    await moveTabTree(draggedTabId, targetTabId, action);
+}
+
+// --- Tree Move Logic ---
+
+async function moveTabTree(sourceId, targetId, action) {
+    // 1. Get entire subtree of source
+    const movingIds = getSubtree(sourceId);
+
+    // Prevent moving a parent into its own child (cycle)
+    if (movingIds.includes(targetId)) {
+        console.warn("Cannot move parent into its own child");
+        return;
     }
 
-    return false;
+    // 2. Determine new Parent and new Index
+    await loadParentOverrides(); // Sync latest state
+
+    let newParentId = null;
+    let targetIndex = -1;
+
+    const targetTab = tabsMap.get(targetId);
+    if (!targetTab) return;
+
+    if (action === 'nest') {
+        // A becomes child of B
+        newParentId = targetId;
+
+        // Append to the end of B's children
+        // We need to find the flat index of the LAST descendant of B
+        const targetSubtree = getSubtree(targetId);
+        const lastDescendantId = targetSubtree[targetSubtree.length - 1];
+        const lastDescendant = tabsMap.get(lastDescendantId);
+
+        // Target index is after the last descendant
+        targetIndex = lastDescendant.index + 1;
+
+        // Determine offset: if we are moving DOWN, the target index logic works.
+        // If we are moving UP, indices shift. Chrome.tabs.move handles the shift if "index" is used correctly
+        // relative to CURRENT layout. 
+        // Note: references to 'index' are from BEFORE the move.
+        // If source is BEFORE target, moving it effectively subtracts from target's index.
+        // Safer to just say: "Place it at X".
+
+    } else if (action === 'before') {
+        // A becomes sibling of B, placed immediately before B
+
+        // Parent is same as B's parent
+        const parentOfTarget = parentOverrides.get(targetId);
+        // If undefined, check internal map or assume root (null if explicitly -1 or missing)
+        // We can just rely on what our 'buildTree' logic thinks B's parent is.
+        // BUT logic needs to match `parentOverrides` structure.
+        // Let's look up B's current effective parent.
+        newParentId = parentOverrides.get(targetId);
+        if (newParentId === undefined) {
+            // If not overridden, could be opener.
+            // But for consistent DragDrop we usually "break" opener bond and make it explicit root or child.
+            // If B is root (null), A becomes root.
+            // Since we don't have easy access to "effective parent" safely without re-running hierarchy logic,
+            // let's peek at the DOM or simplify? 
+            // Actually, `tabsMap` doesn't store computed parent easily.
+
+            // Let's assume: if target is a Root in UI, new parent is null (-1).
+            if (rootTabs.includes(targetId)) newParentId = -1;
+            else {
+                // Find who claims B as child
+                // Expensive reverse lookup? Or just stick to explicit overrides?
+                // If we don't know, we default to -1 (Root) or keep existing parent?
+                // Better approach: Look at the DOM structure!
+                const targetNode = document.querySelector(`.tab-tree-node[data-tab-id="${targetId}"]`);
+                const parentNode = targetNode.parentElement.closest('.tab-tree-node');
+                if (parentNode) {
+                    newParentId = Number(parentNode.dataset.tabId);
+                } else {
+                    newParentId = -1; // Root
+                }
+            }
+        }
+
+        // Index: B's current index
+        targetIndex = targetTab.index;
+
+    } else if (action === 'after') {
+        // A becomes sibling of B, placed after B (and B's subtree)
+
+        // Parent: Same as 'before' case
+        const targetNode = document.querySelector(`.tab-tree-node[data-tab-id="${targetId}"]`);
+        const parentNode = targetNode.parentElement.closest('.tab-tree-node');
+        if (parentNode) {
+            newParentId = Number(parentNode.dataset.tabId);
+        } else {
+            newParentId = -1;
+        }
+
+        // Index: After B's entire subtree
+        const targetSubtree = getSubtree(targetId);
+        const lastDescendantId = targetSubtree[targetSubtree.length - 1];
+        const lastDescendant = tabsMap.get(lastDescendantId);
+
+        targetIndex = lastDescendant.index + 1;
+    }
+
+    // 3. Update Visual/Internal Hierarchy (Parent Overrides)
+    // We only update the ROOT of the moving subtree
+    if (newParentId === -1) {
+        // Explicit root: delete override if we want to revert to opener? 
+        // No, we want to FORCE root. So set to -1.
+        parentOverrides.set(sourceId, -1);
+    } else if (newParentId) {
+        parentOverrides.set(sourceId, newParentId);
+    } else {
+        // undefined/null? Treat as root usually or keep existing. 
+        // Safest is explicit -1 if we mean root.
+        // If we matched a parent, set it.
+    }
+
+    await saveParentOverrides();
+
+    // 4. Perform the Move (Chrome Tabs API)
+    // We move the entire subtree to the new index.
+    // NOTE: indices change as we move items.
+    // Chrome API allows moving multiple tabs at once! `chrome.tabs.move(tabIds, {index})`
+    // This is atomic and handles shifting much better.
+
+    try {
+        await chrome.tabs.move(movingIds, { index: targetIndex });
+    } catch (err) {
+        console.error("Move failed", err);
+        // Fallback: re-render to at least show current state (even if move failed)
+        fetchAndRenderTabs();
+    }
+
+    // The onMoved or onUpdated listener will trigger re-render
+}
+
+function getSubtree(rootId) {
+    const results = [rootId];
+    const tab = tabsMap.get(rootId);
+    if (tab && tab.children) {
+        for (const childId of tab.children) {
+            results.push(...getSubtree(childId));
+        }
+    }
+    return results;
 }
 
 // Hierarchy Override for Drag & Drop
@@ -701,23 +866,6 @@ async function saveParentOverrides() {
     await chrome.storage.local.set({
         parentOverrides: Object.fromEntries(parentOverrides)
     });
-}
-
-async function nestTab(childId, parentId) {
-    // Prevent cycles (simple check)
-    if (childId === parentId) return;
-
-    // Check if parent is descendant of child (prevent disappearing)
-    // For simplicity in this prompt, doing single level check or relying on re-render.
-
-    // Store override
-    await loadParentOverrides(); // ensure fresh
-    parentOverrides.set(childId, parentId);
-    await chrome.storage.local.set({
-        parentOverrides: Object.fromEntries(parentOverrides)
-    });
-
-    fetchAndRenderTabs();
 }
 
 // --- Bookmarks Logic ---
