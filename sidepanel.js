@@ -365,6 +365,15 @@ function createTabNode(tabId, depth = 0) {
         chrome.tabs.update(tabId, { active: true });
     });
 
+    // Middle Click to Close
+    row.addEventListener('auxclick', (e) => {
+        if (e.button === 1) { // Middle Mouse Button
+            e.stopPropagation(); // Prevent other actions
+            e.preventDefault();  // Prevent default scrolling usually associated with middle click
+            chrome.tabs.remove(tabId);
+        }
+    });
+
     // 2. Expand/Collapse Arrow
     const arrow = document.createElement('div');
     arrow.className = `expand-arrow ${hasChildren ? '' : 'hidden'}`;
