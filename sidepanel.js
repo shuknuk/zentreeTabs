@@ -42,7 +42,111 @@ document.addEventListener('DOMContentLoaded', async () => {
     // UI Listeners
     newTabBtn.addEventListener('click', () => chrome.tabs.create({}));
     searchInput.addEventListener('input', handleSearch);
+
+    // Settings Modal Logic
+    const settingsModal = document.getElementById('settings-modal');
+    const settingsBtn = document.getElementById('settings-btn');
+    const closeSettingsBtn = document.getElementById('close-settings');
+    const toggleMesh = document.getElementById('toggle-mesh');
+    const toggleGlass = document.getElementById('toggle-glass');
+
+    // Helper to update UI state of toggles
+    const updateToggleState = (meshEnabled) => {
+        if (!toggleGlass) return;
+        const row = toggleGlass.closest('.setting-row');
+        if (meshEnabled) {
+            row.classList.remove('disabled');
+            toggleGlass.disabled = false;
+        } else {
+            row.classList.add('disabled');
+            toggleGlass.disabled = true;
+        }
+    };
+
+    if (settingsBtn && settingsModal) {
+        settingsBtn.addEventListener('click', () => {
+            // Sync UI state before showing
+            chrome.storage.local.get({ themeSettings: { bgMesh: true, tabGlass: true } }, (res) => {
+                const settings = res.themeSettings;
+                if (toggleMesh) {
+                    toggleMesh.checked = settings.bgMesh;
+                    // Initial dependency check
+                    updateToggleState(settings.bgMesh);
+                }
+                if (toggleGlass) toggleGlass.checked = settings.tabGlass;
+                settingsModal.classList.remove('hidden');
+            });
+        });
+    }
+
+    if (closeSettingsBtn) {
+        closeSettingsBtn.addEventListener('click', () => {
+            settingsModal.classList.add('hidden');
+        });
+    }
+
+    // Close on backdrop click
+    if (settingsModal) {
+        settingsModal.addEventListener('click', (e) => {
+            if (e.target === settingsModal) {
+                settingsModal.classList.add('hidden');
+            }
+        });
+    }
+
+    // Toggle Listeners
+    if (toggleMesh) {
+        toggleMesh.addEventListener('change', () => {
+            const isEnabled = toggleMesh.checked;
+            updateToggleState(isEnabled);
+            updateThemeSettings({ bgMesh: isEnabled });
+        });
+    }
+    if (toggleGlass) {
+        toggleGlass.addEventListener('change', () => {
+            updateThemeSettings({ tabGlass: toggleGlass.checked });
+        });
+    }
+
+    // Theme Logic
+    await applyTheme();
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes.themeSettings) {
+            applyTheme();
+        }
+    });
 });
+
+async function updateThemeSettings(partialSettings) {
+    const res = await chrome.storage.local.get({ themeSettings: { bgMesh: true, tabGlass: true } });
+    const newSettings = { ...res.themeSettings, ...partialSettings };
+    await chrome.storage.local.set({ themeSettings: newSettings });
+}
+
+async function applyTheme() {
+    const res = await chrome.storage.local.get({ themeSettings: { bgMesh: true, tabGlass: true } });
+    const settings = res.themeSettings;
+
+    // 1. Background Mesh (Master Switch)
+    if (!settings.bgMesh) {
+        document.body.classList.add('no-mesh');
+        // Logic Requirement: If Master is OFF, Tabs must be FLAT (simulating "Glass Off").
+        // We override the visual state here regardless of the saved tabGlass setting.
+        document.body.classList.add('flat-tabs');
+    } else {
+        document.body.classList.remove('no-mesh');
+
+        // 2. Tab Glass (Only respected if Mesh is ON)
+        if (!settings.tabGlass) {
+            document.body.classList.add('flat-tabs');
+        } else {
+            document.body.classList.remove('flat-tabs');
+        }
+    }
+
+    // Legacy cleanup (remove simple-theme if it persisted)
+    document.body.classList.remove('simple-theme');
+}
 
 // --- Core Data Fetching ---
 
@@ -927,9 +1031,9 @@ function createBookmarkNode(node) {
     }
 
     const title = document.createElement('span');
+    title.className = 'bookmark-title';
     title.textContent = node.title || (isFolder ? 'Untitled Folder' : 'Untitled');
     title.style.overflow = 'hidden';
-    title.style.textOverflow = 'ellipsis';
     item.appendChild(title);
 
     container.appendChild(item);
@@ -1084,7 +1188,7 @@ function createDownloadNode(item) {
     info.className = 'download-info';
 
     const name = document.createElement('div');
-    name.className = 'download-filename';
+    name.className = 'download-title';
     // chrome.downloads items have 'filename' (full path usually). extracting basename.
     // If filename is empty (interrupted?), use id or status
     const filename = item.filename ? item.filename.split(/[/\\]/).pop() : 'Unknown File';
