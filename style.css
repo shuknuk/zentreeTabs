@@ -811,6 +811,56 @@ body.flat-tabs .tab-item.active {
     white-space: nowrap;
 }
 
+/* --- Bookmarks Tree --- */
+.bookmark-children {
+    display: none;
+    padding-left: 16px;
+    margin-left: 6px;
+    border-left: 1px solid var(--border-color);
+}
+
+.bookmark-children.expanded {
+    display: block;
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Ensure folder arrow rotates */
+.folder-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    margin-right: 4px;
+    color: var(--text-secondary);
+    transition: transform 0.2s;
+    /* Visual tweak: subtle optical centering for chevron */
+    transform: translateY(1px);
+}
+
+.folder-arrow.rotated {
+    transform: rotate(90deg);
+}
+
+.folder-icon {
+    margin-right: 8px;
+    color: var(--accent-color);
+    display: flex;
+    align-items: center;
+}
+
 /* --- Granular Compatibility --- */
 /* If Flat Tabs is ON (Glass Off) */
 body.flat-tabs .bookmark-item,
