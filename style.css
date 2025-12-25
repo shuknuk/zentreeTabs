@@ -3,29 +3,35 @@
 :root {
     /* Light Mode Palette */
     --bg-gradient: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%);
-    --bg-color: #f7f9fc; /* Fallback */
-    
-    --glass-bg: rgba(255, 255, 255, 0.65);
-    --glass-border: rgba(255, 255, 255, 0.4);
+    --bg-color: #f7f9fc;
+    /* Fallback */
+
+    /* Mesh Gradient Colors */
+    --orb-1: #e9f0ff;
+    --orb-2: #e0f6ff;
+
+    --glass-bg: rgba(255, 255, 255, 0.45);
+    /* More transparent for mesh */
+    --glass-border: rgba(255, 255, 255, 0.5);
     --glass-shadow: 0 4px 30px rgba(0, 0, 0, 0.05);
-    --glass-blur: blur(16px);
-    
+    --glass-blur: blur(20px);
+
     --text-primary: #1a1a1a;
     --text-secondary: #5f6368;
-    
+
     --accent-color: #2b6bfd;
     --accent-glow: rgba(43, 107, 253, 0.3);
-    
-    --hover-bg: rgba(255, 255, 255, 0.5);
-    --active-bg: rgba(255, 255, 255, 0.8);
-    
+
+    --hover-bg: rgba(255, 255, 255, 0.4);
+    --active-bg: rgba(255, 255, 255, 0.65);
+
     --border-color: rgba(0, 0, 0, 0.06);
-    
+
     --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --radius-md: 16px;
     --radius-sm: 10px;
     --transition-speed: 0.25s;
-    
+
     /* Scrollbar */
     --scrollbar-thumb: rgba(0, 0, 0, 0.1);
     --scrollbar-thumb-hover: rgba(0, 0, 0, 0.2);
@@ -34,24 +40,25 @@
 @media (prefers-color-scheme: dark) {
     :root {
         /* Dark Mode Palette */
-        --bg-gradient: linear-gradient(135deg, #1e1e24 0%, #121212 100%);
-        --bg-color: #1e1e1e;
-        
-        --glass-bg: rgba(30, 30, 35, 0.65);
+        --bg-color: #121212;
+        --orb-1: #1a1a2e;
+        --orb-2: #16213e;
+
+        --glass-bg: rgba(20, 20, 25, 0.45);
         --glass-border: rgba(255, 255, 255, 0.08);
-        --glass-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
-        
+        --glass-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+
         --text-primary: #f0f0f0;
         --text-secondary: #a0a0a0;
-        
+
         --accent-color: #7aa7ff;
         --accent-glow: rgba(122, 167, 255, 0.25);
-        
+
         --hover-bg: rgba(255, 255, 255, 0.06);
         --active-bg: rgba(255, 255, 255, 0.12);
-        
+
         --border-color: rgba(255, 255, 255, 0.06);
-        
+
         --scrollbar-thumb: rgba(255, 255, 255, 0.15);
         --scrollbar-thumb-hover: rgba(255, 255, 255, 0.25);
     }
@@ -65,15 +72,58 @@
 
 body {
     font-family: var(--font-family);
-    background: var(--bg-gradient);
-    background-attachment: fixed; /* Keep gradient still during scroll if body scrolled */
+    background-color: var(--bg-color);
+    /* Fallback */
     color: var(--text-primary);
     height: 100vh;
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
+    position: relative;
+}
+
+/* Simulated Mesh Background */
+body::before,
+body::after {
+    content: '';
+    position: absolute;
+    width: 600px;
+    height: 600px;
+    border-radius: 50%;
+    filter: blur(80px);
+    /* Heavy blur for mesh effect */
+    opacity: 0.6;
+    z-index: -1;
+    pointer-events: none;
+    animation: floatOrb 20s infinite alternate ease-in-out;
+}
+
+body::before {
+    background: var(--orb-1);
+    top: -200px;
+    left: -200px;
+}
+
+body::after {
+    background: var(--orb-2);
+    bottom: -200px;
+    right: -200px;
+    animation-delay: -10s;
+}
+
+@keyframes floatOrb {
+    0% {
+        transform: translate(0, 0) rotate(0deg);
+    }
+
+    100% {
+        transform: translate(50px, 50px) rotate(20deg);
+    }
 }
 
 .app-container {
+    position: relative;
+    z-index: 1;
+    /* Content above blobs */
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -84,7 +134,8 @@ body {
     padding: 16px 16px 12px;
     background: var(--glass-bg);
     backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur); /* Safari */
+    -webkit-backdrop-filter: var(--glass-blur);
+    /* Safari */
     border-bottom: 1px solid var(--glass-border);
     box-shadow: var(--glass-shadow);
     z-index: 100;
@@ -132,7 +183,8 @@ body {
 #tab-search {
     width: 100%;
     padding: 10px 12px 10px 38px;
-    background: rgba(128, 128, 128, 0.08); /* More subtle internal bg */
+    background: rgba(128, 128, 128, 0.08);
+    /* More subtle internal bg */
     border: 1px solid transparent;
     border-radius: var(--radius-md);
     color: var(--text-primary);
@@ -150,7 +202,8 @@ body {
 /* --- Tab List --- */
 .tabs-list {
     flex: 1;
-    overflow-y: overlay; /* Standard scrollbar but overlay if supported */
+    overflow-y: overlay;
+    /* Standard scrollbar but overlay if supported */
     padding: 12px 8px;
 }
 
@@ -159,15 +212,19 @@ body {
     width: 6px;
     height: 6px;
 }
+
 .tabs-list::-webkit-scrollbar-track {
     background: transparent;
 }
+
 .tabs-list::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-thumb);
     border-radius: 4px;
-    border: 2px solid transparent; /* padding around thumb */
+    border: 2px solid transparent;
+    /* padding around thumb */
     background-clip: content-box;
 }
+
 .tabs-list::-webkit-scrollbar-thumb:hover {
     background-color: var(--scrollbar-thumb-hover);
 }
@@ -209,7 +266,8 @@ body {
     border-radius: 50%;
     background-color: var(--group-color);
     margin-right: 10px;
-    box-shadow: 0 0 8px var(--group-color); /* Glow */
+    box-shadow: 0 0 8px var(--group-color);
+    /* Glow */
     opacity: 0.8;
 }
 
@@ -217,6 +275,7 @@ body {
     position: relative;
     /* Connecting Line logic could go here */
 }
+
 .group-body.collapsed {
     display: none;
 }
@@ -232,14 +291,15 @@ body {
     transition: all var(--transition-speed) ease;
     user-select: none;
     position: relative;
-    border: 1px solid transparent; /* Space for border effect */
+    border: 1px solid transparent;
+    /* Space for border effect */
 }
 
 /* Hover Effect - Glassy */
 .tab-item:hover {
     background-color: var(--hover-bg);
     backdrop-filter: blur(4px);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
 }
 
 /* Active State - Floating Glass */
@@ -271,7 +331,7 @@ body {
     height: 16px;
     margin-right: 12px;
     border-radius: 3px;
-    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
 }
 
 .tab-title {
@@ -293,7 +353,7 @@ body {
     background: rgba(255, 255, 255, 0.5);
     backdrop-filter: blur(4px);
     color: var(--text-primary);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 /* Close Button - Subtle */
@@ -329,6 +389,7 @@ body {
 .tab-children {
     transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
 .tab-children.collapsed {
     display: none;
 }
@@ -345,13 +406,16 @@ body {
     border-radius: 50%;
     opacity: 0.6;
 }
+
 .expand-arrow:hover {
     background-color: var(--hover-bg);
     opacity: 1;
 }
+
 .expand-arrow.rotated {
     transform: rotate(90deg);
 }
+
 .expand-arrow.hidden {
     visibility: hidden;
 }
@@ -390,9 +454,11 @@ body {
     max-height: 40vh;
     display: flex;
     flex-direction: column;
-    background: rgba(0,0,0,0.02); /* Slight darken for separation */
+    background: rgba(0, 0, 0, 0.02);
+    /* Slight darken for separation */
     border-top: 1px solid var(--glass-border);
 }
+
 .bookmarks-section.hidden {
     display: none;
 }
@@ -424,6 +490,7 @@ body {
     display: flex;
     align-items: center;
 }
+
 .bookmark-item:hover {
     background: var(--hover-bg);
 }
