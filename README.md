@@ -14,9 +14,14 @@
 
 - **🌳 Vertical Tree Layout**: Tabs automatically nest under their "opener", keeping your research context organized.
 - **📂 Native Group Integration**: Existing Chrome Tab Groups are visualized as folders. Click headers to collapse/expand both the sidebar and the top group strip.
+- **🔖 Bookmarks Manager**: integrated sidebar to view, open, and manage your bookmarks hierarchy.
+- **📥 Downloads Manager**: Track recent downloads, view their status, and open files directly from the panel.
 - **✏️ Tab Renaming**: Double-click any tab title to rename it locally (`Enter` to save, `Esc` to cancel).
-- **✋ Drag & Drop**: Reorder tabs or change their nesting hierarchy with smooth HTML5 drag-and-drop.
+- **✋ Drag & Drop**: Reorder tabs or change their nesting hierarchy with smooth HTML5 drag-and-drop. You can also drag tabs directly into Group Headers to group them.
 - **🎨 Modern Aesthetic**: Features a "Vibe Coding" inspired UI with glassmorphism, hover effects, and full Dark Mode support.
+- **🎭 Theming Support**:
+  - **5 Themes**: Ocean (Default), Sunset, Forest, Berry, and Monochrome.
+  - **Customization**: Toggle "Background Mesh" and "Glassy Tabs" for a personal feel.
 - **🖼️ Smart Icons**: 
   - Correctly fetches icons for Extension pages (New Tab, etc.).
   - Displays clean SVG system icons for `chrome://` pages (Settings, Extensions, History, etc.).
