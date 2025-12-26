@@ -3,29 +3,35 @@
 :root {
     /* Light Mode Palette */
     --bg-gradient: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%);
-    --bg-color: #f7f9fc; /* Fallback */
-    
-    --glass-bg: rgba(255, 255, 255, 0.65);
-    --glass-border: rgba(255, 255, 255, 0.4);
+    --bg-color: #f7f9fc;
+    /* Fallback */
+
+    /* Mesh Gradient Colors */
+    --orb-1: #e9f0ff;
+    --orb-2: #e0f6ff;
+
+    --glass-bg: rgba(255, 255, 255, 0.45);
+    /* More transparent for mesh */
+    --glass-border: rgba(255, 255, 255, 0.5);
     --glass-shadow: 0 4px 30px rgba(0, 0, 0, 0.05);
-    --glass-blur: blur(16px);
-    
+    --glass-blur: blur(20px);
+
     --text-primary: #1a1a1a;
     --text-secondary: #5f6368;
-    
+
     --accent-color: #2b6bfd;
     --accent-glow: rgba(43, 107, 253, 0.3);
-    
-    --hover-bg: rgba(255, 255, 255, 0.5);
-    --active-bg: rgba(255, 255, 255, 0.8);
-    
+
+    --hover-bg: rgba(255, 255, 255, 0.4);
+    --active-bg: rgba(255, 255, 255, 0.65);
+
     --border-color: rgba(0, 0, 0, 0.06);
-    
+
     --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --radius-md: 16px;
     --radius-sm: 10px;
     --transition-speed: 0.25s;
-    
+
     /* Scrollbar */
     --scrollbar-thumb: rgba(0, 0, 0, 0.1);
     --scrollbar-thumb-hover: rgba(0, 0, 0, 0.2);
@@ -34,24 +40,25 @@
 @media (prefers-color-scheme: dark) {
     :root {
         /* Dark Mode Palette */
-        --bg-gradient: linear-gradient(135deg, #1e1e24 0%, #121212 100%);
-        --bg-color: #1e1e1e;
-        
-        --glass-bg: rgba(30, 30, 35, 0.65);
+        --bg-color: #121212;
+        --orb-1: #1a1a2e;
+        --orb-2: #16213e;
+
+        --glass-bg: rgba(20, 20, 25, 0.45);
         --glass-border: rgba(255, 255, 255, 0.08);
-        --glass-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
-        
+        --glass-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+
         --text-primary: #f0f0f0;
         --text-secondary: #a0a0a0;
-        
+
         --accent-color: #7aa7ff;
         --accent-glow: rgba(122, 167, 255, 0.25);
-        
+
         --hover-bg: rgba(255, 255, 255, 0.06);
         --active-bg: rgba(255, 255, 255, 0.12);
-        
+
         --border-color: rgba(255, 255, 255, 0.06);
-        
+
         --scrollbar-thumb: rgba(255, 255, 255, 0.15);
         --scrollbar-thumb-hover: rgba(255, 255, 255, 0.25);
     }
@@ -65,15 +72,324 @@
 
 body {
     font-family: var(--font-family);
-    background: var(--bg-gradient);
-    background-attachment: fixed; /* Keep gradient still during scroll if body scrolled */
+    background-color: var(--bg-color);
+    /* Fallback */
     color: var(--text-primary);
     height: 100vh;
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
+    position: relative;
+}
+
+/* Simulated Mesh Background */
+body::before,
+body::after {
+    content: '';
+    position: absolute;
+    width: 600px;
+    height: 600px;
+    border-radius: 50%;
+    filter: blur(80px);
+    /* Heavy blur for mesh effect */
+    opacity: 0.6;
+    z-index: -1;
+    pointer-events: none;
+    animation: floatOrb 20s infinite alternate ease-in-out;
+}
+
+body::before {
+    background: var(--orb-1);
+    top: -200px;
+    left: -200px;
+}
+
+body::after {
+    background: var(--orb-2);
+    bottom: -200px;
+    right: -200px;
+    animation-delay: -10s;
+}
+
+@keyframes floatOrb {
+    0% {
+        transform: translate(0, 0) rotate(0deg);
+    }
+
+    100% {
+        transform: translate(50px, 50px) rotate(20deg);
+    }
+}
+
+/* --- Settings Modal --- */
+.settings-modal {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(4px);
+    z-index: 200;
+    display: flex;
+    align-items: flex-end;
+    /* Bottom sheet style or center? User said "pop up", let's do bottom sheet above footer */
+    justify-content: center;
+    padding-bottom: 70px;
+    /* Above footer */
+    opacity: 1;
+    transition: opacity 0.2s;
+}
+
+.settings-modal.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.settings-content {
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    width: 90%;
+    max-width: 320px;
+    padding: 16px;
+    border-radius: var(--radius-md);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--glass-border);
+    transform: translateY(0);
+    transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.settings-modal.hidden .settings-content {
+    transform: translateY(20px);
+}
+
+.settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.settings-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: var(--text-primary);
+    transition: opacity 0.2s;
+}
+
+.setting-row.disabled {
+    opacity: 0.5;
+    pointer-events: none;
+    filter: grayscale(1);
+}
+
+/* Toggle Switch css */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 22px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.2);
+    transition: .4s;
+    border-radius: 34px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 2px;
+    bottom: 2px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+input:checked+.slider {
+    background-color: var(--accent-color);
+}
+
+input:checked+.slider:before {
+    transform: translateX(18px);
+}
+
+
+/* --- Theme Selector --- */
+.setting-row.vertical {
+    display: block;
+    text-align: left;
+}
+
+.theme-selector {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+
+.theme-swatch {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    padding: 0;
+}
+
+.theme-swatch:hover {
+    transform: scale(1.1);
+}
+
+.theme-swatch.active {
+    box-shadow: 0 0 0 2px var(--glass-bg), 0 0 0 4px var(--accent-color);
+    border-color: transparent !important;
+    /* override inline style border if needed, usually managed by JS or class */
+}
+
+/* --- Granular Themes (Presets) --- */
+
+/* Default is defined in :root. We override vars for specific theme classes */
+
+/* Sunset */
+body.theme-sunset {
+    --orb-1: #ff9a9e;
+    --orb-2: #fecfef;
+    --accent-color: #ff6b6b;
+    --accent-glow: rgba(255, 107, 107, 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+    body.theme-sunset {
+        --orb-1: #5e2a2a;
+        --orb-2: #4a1e35;
+        --accent-color: #ff8e8e;
+    }
+}
+
+/* Forest */
+body.theme-forest {
+    --orb-1: #84fab0;
+    --orb-2: #8fd3f4;
+    --accent-color: #00b894;
+    --accent-glow: rgba(0, 184, 148, 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+    body.theme-forest {
+        --orb-1: #1e3c2f;
+        --orb-2: #162f3a;
+        --accent-color: #55efc4;
+    }
+}
+
+/* Berry */
+body.theme-berry {
+    --orb-1: #a18cd1;
+    --orb-2: #fbc2eb;
+    --accent-color: #9b59b6;
+    --accent-glow: rgba(155, 89, 182, 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+    body.theme-berry {
+        --orb-1: #2e1e3e;
+        --orb-2: #3a162e;
+        --accent-color: #be93d4;
+    }
+}
+
+/* Monochrome */
+body.theme-monochrome {
+    --orb-1: #bdc3c7;
+    --orb-2: #ecf0f1;
+    --accent-color: #2c3e50;
+    --accent-glow: rgba(44, 62, 80, 0.3);
+}
+
+@media (prefers-color-scheme: dark) {
+    body.theme-monochrome {
+        --orb-1: #2c3e50;
+        --orb-2: #34495e;
+        --accent-color: #ecf0f1;
+        --text-primary: #ffffff;
+    }
+}
+
+/* --- Granular Themes (No Mesh / Flat) --- */
+
+/* 1. No Mesh */
+body.no-mesh::before,
+body.no-mesh::after {
+    display: none;
+}
+
+/* If no mesh, fallback background is used */
+
+/* 2. Flat Tabs (No Glass) */
+body.flat-tabs .tab-item {
+    backdrop-filter: none;
+    background: transparent;
+    border: 1px solid transparent;
+    box-shadow: none;
+    margin: 0;
+}
+
+body.flat-tabs .tab-item:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+body.flat-tabs .tab-item.active {
+    background: rgba(43, 107, 253, 0.1);
+    box-shadow: none;
+    border-color: transparent;
+    color: var(--accent-color);
+}
+
+/* body.flat-tabs .tab-item.active::before {
+    Keep the pill indicator inherited
+} */
+
+@media (prefers-color-scheme: dark) {
+    body.flat-tabs .tab-item:hover {
+        background: rgba(255, 255, 255, 0.08);
+    }
+
+    body.flat-tabs .tab-item.active {
+        background: rgba(94, 158, 255, 0.15);
+    }
 }
 
 .app-container {
+    position: relative;
+    z-index: 1;
+    /* Content above blobs */
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -84,7 +400,8 @@ body {
     padding: 16px 16px 12px;
     background: var(--glass-bg);
     backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur); /* Safari */
+    -webkit-backdrop-filter: var(--glass-blur);
+    /* Safari */
     border-bottom: 1px solid var(--glass-border);
     box-shadow: var(--glass-shadow);
     z-index: 100;
@@ -132,7 +449,8 @@ body {
 #tab-search {
     width: 100%;
     padding: 10px 12px 10px 38px;
-    background: rgba(128, 128, 128, 0.08); /* More subtle internal bg */
+    background: rgba(128, 128, 128, 0.08);
+    /* More subtle internal bg */
     border: 1px solid transparent;
     border-radius: var(--radius-md);
     color: var(--text-primary);
@@ -150,7 +468,8 @@ body {
 /* --- Tab List --- */
 .tabs-list {
     flex: 1;
-    overflow-y: overlay; /* Standard scrollbar but overlay if supported */
+    overflow-y: overlay;
+    /* Standard scrollbar but overlay if supported */
     padding: 12px 8px;
 }
 
@@ -159,15 +478,19 @@ body {
     width: 6px;
     height: 6px;
 }
+
 .tabs-list::-webkit-scrollbar-track {
     background: transparent;
 }
+
 .tabs-list::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-thumb);
     border-radius: 4px;
-    border: 2px solid transparent; /* padding around thumb */
+    border: 2px solid transparent;
+    /* padding around thumb */
     background-clip: content-box;
 }
+
 .tabs-list::-webkit-scrollbar-thumb:hover {
     background-color: var(--scrollbar-thumb-hover);
 }
@@ -209,7 +532,8 @@ body {
     border-radius: 50%;
     background-color: var(--group-color);
     margin-right: 10px;
-    box-shadow: 0 0 8px var(--group-color); /* Glow */
+    box-shadow: 0 0 8px var(--group-color);
+    /* Glow */
     opacity: 0.8;
 }
 
@@ -217,6 +541,7 @@ body {
     position: relative;
     /* Connecting Line logic could go here */
 }
+
 .group-body.collapsed {
     display: none;
 }
@@ -232,14 +557,15 @@ body {
     transition: all var(--transition-speed) ease;
     user-select: none;
     position: relative;
-    border: 1px solid transparent; /* Space for border effect */
+    border: 1px solid transparent;
+    /* Space for border effect */
 }
 
 /* Hover Effect - Glassy */
 .tab-item:hover {
     background-color: var(--hover-bg);
     backdrop-filter: blur(4px);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
 }
 
 /* Active State - Floating Glass */
@@ -271,7 +597,8 @@ body {
     height: 16px;
     margin-right: 12px;
     border-radius: 3px;
-    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+    flex-shrink: 0;
 }
 
 .tab-title {
@@ -280,6 +607,8 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     flex-grow: 1;
+    min-width: 0;
+    /* Important for flex truncation */
     opacity: 0.9;
 }
 
@@ -293,7 +622,7 @@ body {
     background: rgba(255, 255, 255, 0.5);
     backdrop-filter: blur(4px);
     color: var(--text-primary);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 /* Close Button - Subtle */
@@ -309,6 +638,7 @@ body {
     color: var(--text-secondary);
     transition: all 0.2s ease;
     transform: scale(0.8);
+    flex-shrink: 0;
 }
 
 .tab-item:hover .close-btn {
@@ -329,6 +659,7 @@ body {
 .tab-children {
     transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
 .tab-children.collapsed {
     display: none;
 }
@@ -344,14 +675,18 @@ body {
     transition: transform 0.2s ease;
     border-radius: 50%;
     opacity: 0.6;
+    flex-shrink: 0;
 }
+
 .expand-arrow:hover {
     background-color: var(--hover-bg);
     opacity: 1;
 }
+
 .expand-arrow.rotated {
     transform: rotate(90deg);
 }
+
 .expand-arrow.hidden {
     visibility: hidden;
 }
@@ -390,9 +725,11 @@ body {
     max-height: 40vh;
     display: flex;
     flex-direction: column;
-    background: rgba(0,0,0,0.02); /* Slight darken for separation */
+    background: rgba(0, 0, 0, 0.02);
+    /* Slight darken for separation */
     border-top: 1px solid var(--glass-border);
 }
+
 .bookmarks-section.hidden {
     display: none;
 }
@@ -415,17 +752,143 @@ body {
     overflow-y: overlay;
 }
 
-.bookmark-item {
-    padding: 6px 8px;
+.bookmark-item,
+.download-item {
+    display: flex;
+    align-items: center;
+    padding: 9px 12px;
+    margin: 3px 0;
     border-radius: var(--radius-sm);
     font-size: 13px;
     color: var(--text-primary);
-    transition: background 0.2s;
+    cursor: pointer;
+    transition: all var(--transition-speed) ease;
+    border: 1px solid transparent;
+    user-select: none;
+    text-decoration: none;
+    /* Ensure links don't have underlines */
+}
+
+/* Glass Hover */
+.bookmark-item:hover,
+.download-item:hover {
+    background-color: var(--hover-bg);
+    backdrop-filter: blur(4px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+}
+
+/* Consistent Icons */
+.bookmark-item img,
+.download-item img,
+.bookmark-item svg,
+.download-item svg {
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    /* Prevent shrink */
+    margin-right: 12px;
+    border-radius: 3px;
+    object-fit: contain;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+}
+
+/* Specific tweaks for file icons or folders */
+.bookmark-item svg {
+    color: var(--text-secondary);
+    /* Folder icons */
+}
+
+/* Ensure text flows well */
+.bookmark-title,
+.download-title {
+    flex-grow: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Downloads specific: meta data styling */
+.download-meta {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-left: 8px;
+    opacity: 0.8;
+    white-space: nowrap;
+}
+
+/* --- Bookmarks Tree --- */
+.bookmark-children {
+    display: none;
+    padding-left: 16px;
+    margin-left: 6px;
+    border-left: 1px solid var(--border-color);
+}
+
+.bookmark-children.expanded {
+    display: block;
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Ensure folder arrow rotates */
+.folder-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    margin-right: 4px;
+    color: var(--text-secondary);
+    transition: transform 0.2s;
+    /* Visual tweak: subtle optical centering for chevron */
+    transform: translateY(1px);
+}
+
+.folder-arrow.rotated {
+    transform: rotate(90deg);
+}
+
+.folder-icon {
+    margin-right: 8px;
+    color: var(--accent-color);
     display: flex;
     align-items: center;
 }
-.bookmark-item:hover {
-    background: var(--hover-bg);
+
+/* --- Granular Compatibility --- */
+/* If Flat Tabs is ON (Glass Off) */
+body.flat-tabs .bookmark-item,
+body.flat-tabs .download-item {
+    backdrop-filter: none;
+    background: transparent;
+    border: 1px solid transparent;
+    box-shadow: none;
+    margin: 0;
+}
+
+body.flat-tabs .bookmark-item:hover,
+body.flat-tabs .download-item:hover {
+    background: rgba(0, 0, 0, 0.05);
+    /* Simple grey hover */
+}
+
+@media (prefers-color-scheme: dark) {
+
+    body.flat-tabs .bookmark-item:hover,
+    body.flat-tabs .download-item:hover {
+        background: rgba(255, 255, 255, 0.08);
+    }
 }
 
 /* --- Drag Indicators --- */

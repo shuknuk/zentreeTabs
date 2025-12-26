@@ -42,7 +42,146 @@ document.addEventListener('DOMContentLoaded', async () => {
     // UI Listeners
     newTabBtn.addEventListener('click', () => chrome.tabs.create({}));
     searchInput.addEventListener('input', handleSearch);
+
+    // Settings Modal Logic
+    const settingsModal = document.getElementById('settings-modal');
+    const settingsBtn = document.getElementById('settings-btn');
+    const closeSettingsBtn = document.getElementById('close-settings');
+    const toggleMesh = document.getElementById('toggle-mesh');
+    const toggleGlass = document.getElementById('toggle-glass');
+
+    // Helper to update UI state of toggles
+    const updateToggleState = (meshEnabled) => {
+        if (!toggleGlass) return;
+        const row = toggleGlass.closest('.setting-row');
+        if (meshEnabled) {
+            row.classList.remove('disabled');
+            toggleGlass.disabled = false;
+        } else {
+            row.classList.add('disabled');
+            toggleGlass.disabled = true;
+        }
+    };
+
+    // Theme Selector Logic
+    const themeSwatches = document.querySelectorAll('.theme-swatch');
+
+    // Helper to update active swatch UI
+    const updateActiveSwatch = (activeTheme) => {
+        themeSwatches.forEach(swatch => {
+            if (swatch.dataset.theme === activeTheme) {
+                swatch.classList.add('active');
+            } else {
+                swatch.classList.remove('active');
+            }
+        });
+    };
+
+    if (themeSwatches.length > 0) {
+        themeSwatches.forEach(swatch => {
+            swatch.addEventListener('click', () => {
+                const theme = swatch.dataset.theme;
+                updateActiveSwatch(theme);
+                updateThemeSettings({ themeColor: theme });
+            });
+        });
+    }
+
+    if (settingsBtn && settingsModal) {
+        settingsBtn.addEventListener('click', () => {
+            // Sync UI state before showing
+            chrome.storage.local.get({ themeSettings: { bgMesh: true, tabGlass: true, themeColor: 'default' } }, (res) => {
+                const settings = res.themeSettings;
+                if (toggleMesh) {
+                    toggleMesh.checked = settings.bgMesh;
+                    // Initial dependency check
+                    updateToggleState(settings.bgMesh);
+                }
+                if (toggleGlass) toggleGlass.checked = settings.tabGlass;
+
+                // Sync Theme Swatch
+                updateActiveSwatch(settings.themeColor);
+
+                settingsModal.classList.remove('hidden');
+            });
+        });
+    }
+
+    if (closeSettingsBtn) {
+        closeSettingsBtn.addEventListener('click', () => {
+            settingsModal.classList.add('hidden');
+        });
+    }
+
+    // Close on backdrop click
+    if (settingsModal) {
+        settingsModal.addEventListener('click', (e) => {
+            if (e.target === settingsModal) {
+                settingsModal.classList.add('hidden');
+            }
+        });
+    }
+
+    // Toggle Listeners
+    if (toggleMesh) {
+        toggleMesh.addEventListener('change', () => {
+            const isEnabled = toggleMesh.checked;
+            updateToggleState(isEnabled);
+            updateThemeSettings({ bgMesh: isEnabled });
+        });
+    }
+    if (toggleGlass) {
+        toggleGlass.addEventListener('change', () => {
+            updateThemeSettings({ tabGlass: toggleGlass.checked });
+        });
+    }
+
+    // Theme Logic
+    await applyTheme();
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes.themeSettings) {
+            applyTheme();
+        }
+    });
 });
+
+async function updateThemeSettings(partialSettings) {
+    const res = await chrome.storage.local.get({ themeSettings: { bgMesh: true, tabGlass: true } });
+    const newSettings = { ...res.themeSettings, ...partialSettings };
+    await chrome.storage.local.set({ themeSettings: newSettings });
+}
+
+async function applyTheme() {
+    const res = await chrome.storage.local.get({ themeSettings: { bgMesh: true, tabGlass: true } });
+    const settings = res.themeSettings;
+
+    // 1. Background Mesh (Master Switch)
+    if (!settings.bgMesh) {
+        document.body.classList.add('no-mesh');
+        // Logic Requirement: If Master is OFF, Tabs must be FLAT (simulating "Glass Off").
+        // We override the visual state here regardless of the saved tabGlass setting.
+        document.body.classList.add('flat-tabs');
+    } else {
+        document.body.classList.remove('no-mesh');
+
+        // 2. Tab Glass (Only respected if Mesh is ON)
+        if (!settings.tabGlass) {
+            document.body.classList.add('flat-tabs');
+        } else {
+            document.body.classList.remove('flat-tabs');
+        }
+    }
+
+    // 3. Color Theme
+    document.body.classList.remove('theme-sunset', 'theme-forest', 'theme-berry', 'theme-monochrome');
+
+    if (settings.themeColor && settings.themeColor !== 'default') {
+        document.body.classList.add(`theme-${settings.themeColor}`);
+    }
+
+    // Legacy cleanup (remove simple-theme if it persisted)
+    document.body.classList.remove('simple-theme');
+}
 
 // --- Core Data Fetching ---
 
@@ -89,38 +228,46 @@ function buildTree(tabs, groupsMap) {
     // We will enforce: If in a Group, display in that Group.
     // Inside the group, we try to nesting if standard logic applies AND both are in same group.
 
+    let overridesChanged = false;
+
     tabs.forEach(tab => {
         const inGroup = tab.groupId !== -1;
 
-        const isNewTab = (tab.pendingUrl === 'chrome://newtab/' || tab.url === 'chrome://newtab/' || tab.title === 'New Tab');
+        const effectiveUrl = tab.pendingUrl || tab.url;
+        const isNewTab = (effectiveUrl === 'chrome://newtab/' || effectiveUrl === 'edge://newtab/');
 
-        // If it implies a fresh start, we force it to be a root forever by saving an override
-        // We use -1 to signify "Explicitly Root"
-        if (isNewTab && !parentOverrides.has(tab.id)) {
-            // We can't await here, so we just set in memory and fire-and-forget save
-            // Realistically, we should do this in an event listener, but doing it here ensures it catches state immediately.
-            parentOverrides.set(tab.id, -1);
-            saveParentOverrides(); // Helper function we will add/ensure exists
-        }
-
+        // If explicitly root in overrides?
         let parentId = parentOverrides.get(tab.id);
 
-        // If no override, use opener. If override is -1, treat as null (root).
         if (parentId === undefined) {
-            parentId = tab.openerTabId;
-        } else if (parentId === -1) {
-            parentId = null;
+            // No override.
+            // PRIORITY 1: Is it a New Tab? -> Force Root.
+            if (isNewTab) {
+                parentOverrides.set(tab.id, -1); // Explicit Root
+                overridesChanged = true;
+                parentId = -1;
+            }
+            // PRIORITY 2: Has Opener? -> Force Parent.
+            else if (tab.openerTabId) {
+                // Found an implicit parent! Crystallize it.
+                if (tabsMap.has(tab.openerTabId)) {
+                    parentId = tab.openerTabId;
+                    parentOverrides.set(tab.id, parentId);
+                    overridesChanged = true;
+                }
+            }
         }
+
+        // Normalize -1 to null for logic
+        if (parentId === -1) parentId = null;
+
         let placed = false;
 
         // Try to nest under a parent
         if (parentId && tabsMap.has(parentId)) {
             const parent = tabsMap.get(parentId);
 
-            // Allow nesting ONLY if:
-            // 1. Both are in SAME group
-            // 2. OR Both are NOT in a group
-            // If they are split across groups, we don't nest visually to avoid confused UI.
+            // strict allow nesting
             if (parent.groupId === tab.groupId) {
                 // Basic cycle prevention
                 const parentsParentId = parentOverrides.get(parentId) || parent.openerTabId;
@@ -132,18 +279,18 @@ function buildTree(tabs, groupsMap) {
         }
 
         if (!placed) {
-            // Is it in a group?
             if (inGroup) {
-                if (!groupBuckets.has(tab.groupId)) {
-                    groupBuckets.set(tab.groupId, []); // Should exist from init but just in case
-                }
+                if (!groupBuckets.has(tab.groupId)) groupBuckets.set(tab.groupId, []); // Should exist from init but just in case
                 groupBuckets.get(tab.groupId).push(tab.id);
             } else {
-                // Root of the main list
                 rootTabs.push(tab.id);
             }
         }
     });
+
+    if (overridesChanged) {
+        saveParentOverrides();
+    }
 
     // Sort roots & buckets
     const sortFn = (a, b) => tabsMap.get(a).index - tabsMap.get(b).index;
@@ -517,7 +664,30 @@ function onTabCreated(tab) {
     pendingScrollTabId = tab.id;
     scheduleRender();
 }
-function onTabRemoved() { scheduleRender(); }
+async function onTabRemoved(tabId, removeInfo) {
+    // Orphan Adoption Logic:
+    // When a tab is removed, its children should move up to its parent (Grandparent adoption)
+    // We use tabsMap because it represents the STATE BEFORE THIS REMOVAL (mostly).
+
+    const node = tabsMap.get(tabId);
+    if (node && node.children && node.children.length > 0) {
+        // Find Grandparent
+        let grandparent = parentOverrides.get(tabId);
+        if (grandparent === undefined) grandparent = node.openerTabId; // Fallback if not saved yet
+        if (grandparent === -1) grandparent = null; // Was root
+
+        // If grandparent is also bad/missing (e.g. bulk close), we might default to Root (-1)
+
+        const newParentVal = (grandparent && tabsMap.has(grandparent)) ? grandparent : -1;
+
+        for (const childId of node.children) {
+            parentOverrides.set(childId, newParentVal);
+        }
+        await saveParentOverrides();
+    }
+
+    scheduleRender();
+}
 function onTabMoved() { scheduleRender(); }
 
 function onTabActivated(activeInfo) {
@@ -927,9 +1097,9 @@ function createBookmarkNode(node) {
     }
 
     const title = document.createElement('span');
+    title.className = 'bookmark-title';
     title.textContent = node.title || (isFolder ? 'Untitled Folder' : 'Untitled');
     title.style.overflow = 'hidden';
-    title.style.textOverflow = 'ellipsis';
     item.appendChild(title);
 
     container.appendChild(item);
@@ -1084,7 +1254,7 @@ function createDownloadNode(item) {
     info.className = 'download-info';
 
     const name = document.createElement('div');
-    name.className = 'download-filename';
+    name.className = 'download-title';
     // chrome.downloads items have 'filename' (full path usually). extracting basename.
     // If filename is empty (interrupted?), use id or status
     const filename = item.filename ? item.filename.split(/[/\\]/).pop() : 'Unknown File';
