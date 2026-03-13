@@ -1,604 +1,273 @@
-/**
- * grouping.js - ENHANCED VERSION
- * Advanced Semantic Tab Grouping Engine with Domain-First Logic
- * 
- * Features:
- * - Domain-First Clustering: Adjacent tabs with same domain auto-group
- * - Semantic Clustering: Cookie scenario with 0.8+ similarity
- * - Proximity Weighting: Physical adjacency (70% semantic + 30% proximity)
- * - Smart AI Labeling: Context-aware group naming
- * - Session-based Isolation: Prevents cross-session pollution
- */
+const MIN_SIMILARITY = 0.75;
 
-export class TabGrouper {
-    constructor(config = {}) {
-        this.config = {
-            // Semantic thresholds
-            minSimilarity: 0.65,        // Base threshold for edge creation
-            cookieThreshold: 0.8,       // High confidence for "cookie scenario"
-            minGroupSize: 2,
-            minConfidence: 0.60,
+const STOP_WORDS = new Set([
+  "about",
+  "after",
+  "again",
+  "also",
+  "among",
+  "and",
+  "back",
+  "because",
+  "being",
+  "between",
+  "could",
+  "from",
+  "have",
+  "into",
+  "just",
+  "more",
+  "most",
+  "only",
+  "over",
+  "same",
+  "some",
+  "such",
+  "than",
+  "that",
+  "their",
+  "them",
+  "then",
+  "there",
+  "these",
+  "they",
+  "this",
+  "through",
+  "under",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "while",
+  "with",
+  "would",
+  "your",
+]);
 
-            // Time-based
-            sessionGap: 45 * 60 * 1000, // 45 minutes split
-            proximityWindow: 10,         // Max tab distance for proximity bonus
+function cosineSimilarity(left, right) {
+  if (!left || !right || left.length !== right.length) {
+    return 0;
+  }
 
-            // Weights for scoring
-            weights: {
-                semantic: 0.7,           // Semantic similarity weight
-                proximity: 0.3,          // Physical adjacency weight
-                time: 0.2                // Temporal coherence
-            },
+  let dot = 0;
+  let leftMagnitude = 0;
+  let rightMagnitude = 0;
 
-            // Domain-first settings
-            domainGrouping: {
-                enabled: true,
-                minAdjacentTabs: config.groupingThreshold || 2,      // Min adjacent tabs to form domain group (default: 2)
-                maxGap: 2                // Max non-domain tabs between domain tabs
-            },
+  for (let i = 0; i < left.length; i += 1) {
+    dot += left[i] * right[i];
+    leftMagnitude += left[i] * left[i];
+    rightMagnitude += right[i] * right[i];
+  }
 
-            ...config
-        };
+  if (!leftMagnitude || !rightMagnitude) {
+    return 0;
+  }
+
+  return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
+}
+
+function normalizeText(text) {
+  return (text || "")
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenize(text, rootDomain) {
+  const domainTokens = new Set(
+    (rootDomain || "")
+      .split(".")
+      .flatMap((part) => part.split("-"))
+      .filter(Boolean),
+  );
+
+  return normalizeText(text)
+    .split(" ")
+    .filter((token) => {
+      return token.length > 2 && !STOP_WORDS.has(token) && !domainTokens.has(token);
+    });
+}
+
+function titleCase(parts) {
+  return parts
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function isCompoundSuffix(parts) {
+  const compoundRoots = new Set(["ac", "co", "com", "edu", "gov", "net", "org"]);
+  return parts.length >= 3 && parts[parts.length - 1].length === 2 && compoundRoots.has(parts[parts.length - 2]);
+}
+
+function getDomainLabel(rootDomain) {
+  const parts = (rootDomain || "").split(".").filter(Boolean);
+  if (parts.length === 0) {
+    return "Domain";
+  }
+
+  if (isCompoundSuffix(parts) && parts.length >= 3) {
+    return parts[parts.length - 3];
+  }
+
+  return parts.length >= 2 ? parts[parts.length - 2] : parts[0];
+}
+
+function buildSemanticGroupName(members) {
+  const tokenSets = [];
+  const bigramSets = [];
+  const tokenScores = new Map();
+  const bigramScores = new Map();
+
+  members.forEach((member) => {
+    const tokens = tokenize(member.context, member.rootDomain);
+    const uniqueTokens = [...new Set(tokens)];
+    tokenSets.push(new Set(uniqueTokens));
+
+    uniqueTokens.forEach((token) => {
+      tokenScores.set(token, (tokenScores.get(token) || 0) + 1);
+    });
+
+    const bigrams = [];
+    for (let i = 0; i < tokens.length - 1; i += 1) {
+      const bigram = `${tokens[i]} ${tokens[i + 1]}`;
+      bigrams.push(bigram);
+    }
+    const uniqueBigrams = [...new Set(bigrams)];
+    bigramSets.push(new Set(uniqueBigrams));
+    uniqueBigrams.forEach((bigram) => {
+      bigramScores.set(bigram, (bigramScores.get(bigram) || 0) + 1);
+    });
+  });
+
+  const commonBigrams = [...bigramScores.entries()]
+    .filter(([, count]) => count === members.length)
+    .sort((left, right) => right[1] - left[1] || right[0].length - left[0].length);
+  if (commonBigrams.length > 0) {
+    return titleCase(commonBigrams[0][0].split(" "));
+  }
+
+  const commonTokens = [...tokenScores.entries()]
+    .filter(([, count]) => count === members.length)
+    .sort((left, right) => right[1] - left[1] || right[0].length - left[0].length)
+    .slice(0, 2)
+    .map(([token]) => token);
+  if (commonTokens.length > 0) {
+    return titleCase(commonTokens);
+  }
+
+  const fallbackTokens = [...tokenScores.entries()]
+    .sort((left, right) => right[1] - left[1] || right[0].length - left[0].length)
+    .slice(0, 2)
+    .map(([token]) => token);
+  if (fallbackTokens.length > 0) {
+    return titleCase(fallbackTokens);
+  }
+
+  return "Shared Topic";
+}
+
+function buildSimilarityMatrix(tabs, embeddings) {
+  const matrix = new Map();
+  tabs.forEach((tab, index) => {
+    const row = new Map();
+    tabs.forEach((otherTab, otherIndex) => {
+      if (index === otherIndex) {
+        row.set(otherTab.id, 1);
+        return;
+      }
+      row.set(otherTab.id, cosineSimilarity(embeddings[index], embeddings[otherIndex]));
+    });
+    matrix.set(tab.id, row);
+  });
+  return matrix;
+}
+
+export function groupTabsBySemanticRules(tabs, embeddings) {
+  if (!tabs.length || tabs.length !== embeddings.length) {
+    return [];
+  }
+
+  const orderedTabs = tabs
+    .map((tab, index) => ({ ...tab, embedding: embeddings[index] }))
+    .sort((left, right) => left.index - right.index);
+
+  const matrix = buildSimilarityMatrix(
+    orderedTabs,
+    orderedTabs.map((tab) => tab.embedding),
+  );
+  const assignedIds = new Set();
+  const semanticCandidates = orderedTabs.filter((tab) => tab.context.trim().length > 0);
+  const seedOrder = semanticCandidates
+    .map((tab) => {
+      const neighborCount = semanticCandidates.filter((other) => {
+        return other.id !== tab.id && matrix.get(tab.id).get(other.id) > MIN_SIMILARITY;
+      }).length;
+      return { tab, neighborCount };
+    })
+    .sort((left, right) => right.neighborCount - left.neighborCount || left.tab.index - right.tab.index);
+
+  const groups = [];
+
+  seedOrder.forEach(({ tab: seed }) => {
+    if (assignedIds.has(seed.id)) {
+      return;
     }
 
-    /**
-     * Main Entry Point - Enhanced with Domain-First Logic
-     * @param {Array} tabs - Array of tab objects {id, title, url, openTime, index}
-     * @param {Array<Array<number>>} embeddings - Array of embedding vectors
-     * @returns {Object} { groups: [...], ungrouped: [...] }
-     */
-    group(tabs, embeddings) {
-        if (!tabs || tabs.length === 0) return { groups: [], ungrouped: [] };
-        if (tabs.length !== embeddings.length) {
-            console.error("TabGrouper: Mismatch between tabs and embeddings counts.");
-            return { groups: [], ungrouped: tabs.map(t => t.id) };
-        }
+    const members = [seed];
+    const candidates = semanticCandidates
+      .filter((candidate) => candidate.id !== seed.id && !assignedIds.has(candidate.id))
+      .sort((left, right) => {
+        return matrix.get(seed.id).get(right.id) - matrix.get(seed.id).get(left.id);
+      });
 
-        // 1. Augment tabs with metadata
-        const richTabs = tabs.map((t, i) => ({
-            ...t,
-            embedding: embeddings[i],
-            type: this.detectContentType(t.title, t.url),
-            domain: this.getDomain(t.url),
-            originalIndex: t.index !== undefined ? t.index : i
-        }));
+    candidates.forEach((candidate) => {
+      const passesAllMembers = members.every((member) => {
+        return matrix.get(member.id).get(candidate.id) > MIN_SIMILARITY;
+      });
+      if (passesAllMembers) {
+        members.push(candidate);
+      }
+    });
 
-        // Sort by original tab index for proximity calculations
-        richTabs.sort((a, b) => a.originalIndex - b.originalIndex);
-
-        const validGroups = [];
-        const assignedIds = new Set();
-
-        // 2. PHASE 1: Domain-First Grouping (Priority)
-        if (this.config.domainGrouping.enabled) {
-            const domainGroups = this.findDomainGroups(richTabs);
-            domainGroups.forEach(group => {
-                validGroups.push(group);
-                group.members.forEach(id => assignedIds.add(id));
-            });
-        }
-
-        // 3. PHASE 2: Semantic Clustering (for remaining tabs)
-        const unassignedTabs = richTabs.filter(t => !assignedIds.has(t.id));
-
-        if (unassignedTabs.length >= this.config.minGroupSize) {
-            // Break into sessions
-            const sessions = this.breakIntoSessions(unassignedTabs);
-
-            // Process each session
-            for (const sessionTabs of sessions) {
-                const edges = this.buildSimilarityGraph(sessionTabs);
-                const candidates = this.findConnectedComponents(sessionTabs, edges);
-                const sessionResult = this.validateAndScore(sessionTabs, candidates);
-
-                sessionResult.groups.forEach(g => {
-                    validGroups.push(g);
-                    g.members.forEach(id => assignedIds.add(id));
-                });
-            }
-        }
-
-        const ungrouped = richTabs.filter(t => !assignedIds.has(t.id)).map(t => t.id);
-        return { groups: validGroups, ungrouped };
+    if (members.length < 2) {
+      return;
     }
 
-    /**
-     * DOMAIN-FIRST LOGIC
-     * Find groups of adjacent tabs with the same root domain
-     */
-    findDomainGroups(tabs) {
-        const groups = [];
-        const { minAdjacentTabs, maxGap } = this.config.domainGrouping;
+    members.forEach((member) => assignedIds.add(member.id));
+    groups.push({
+      name: buildSemanticGroupName(members),
+      tabIds: members.map((member) => member.id),
+      type: "semantic",
+    });
+  });
 
-        let i = 0;
-        while (i < tabs.length) {
-            const currentDomain = tabs[i].domain;
-            if (!currentDomain || currentDomain === 'newtab') {
-                i++;
-                continue;
-            }
-
-            // Find all adjacent tabs with same domain (allowing small gaps)
-            const cluster = [tabs[i]];
-            let gapCount = 0;
-            let j = i + 1;
-
-            while (j < tabs.length && gapCount <= maxGap) {
-                if (tabs[j].domain === currentDomain) {
-                    cluster.push(tabs[j]);
-                    gapCount = 0; // Reset gap counter
-                } else {
-                    gapCount++;
-                }
-                j++;
-            }
-
-            // If we found enough adjacent tabs, create a domain group
-            if (cluster.length >= minAdjacentTabs) {
-                const memberIds = cluster.map(t => t.id);
-                const groupName = this.generateDomainGroupName(cluster);
-
-                groups.push({
-                    id: `dom_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-                    title: groupName,
-                    members: memberIds,
-                    confidence: 0.95, // High confidence for domain groups
-                    type: 'domain',
-                    debug: {
-                        domain: currentDomain,
-                        count: cluster.length,
-                        reason: 'domain-first'
-                    }
-                });
-
-                // Skip past this cluster
-                i = j;
-            } else {
-                i++;
-            }
-        }
-
-        return groups;
+  const fallbackBuckets = new Map();
+  orderedTabs.forEach((tab) => {
+    if (assignedIds.has(tab.id) || tab.hasUsableDescription || !tab.rootDomain) {
+      return;
     }
 
-    /**
-     * Generate smart name for domain groups
-     */
-    generateDomainGroupName(tabs) {
-        const domain = tabs[0].domain;
+    if (!fallbackBuckets.has(tab.rootDomain)) {
+      fallbackBuckets.set(tab.rootDomain, []);
+    }
+    fallbackBuckets.get(tab.rootDomain).push(tab);
+  });
 
-        // Extract meaningful part of domain
-        const parts = domain.split('.');
-        let baseName = parts[parts.length - 2] || parts[0];
-
-        // Capitalize
-        baseName = baseName.charAt(0).toUpperCase() + baseName.slice(1);
-
-        // Try to add context from titles
-        const commonWords = this.extractCommonWords(tabs.map(t => t.title), 2);
-        if (commonWords.length > 0) {
-            return `${baseName} - ${commonWords.join(' ')}`;
-        }
-
-        return `${baseName} (${tabs.length})`;
+  fallbackBuckets.forEach((bucket, rootDomain) => {
+    if (bucket.length < 3) {
+      return;
     }
 
-    /**
-     * Extract common words from titles
-     */
-    extractCommonWords(titles, maxWords = 2) {
-        const stopWords = new Set([
-            'the', 'and', 'or', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for',
-            'with', 'by', 'from', 'new', 'tab', 'page'
-        ]);
+    bucket.forEach((tab) => assignedIds.add(tab.id));
+    groups.push({
+      name: titleCase([getDomainLabel(rootDomain)]),
+      tabIds: bucket.map((tab) => tab.id),
+      type: "fallback",
+    });
+  });
 
-        const wordCounts = {};
-        titles.forEach(title => {
-            const words = title.toLowerCase()
-                .replace(/[^a-z0-9 ]/g, ' ')
-                .split(/\s+/)
-                .filter(w => w.length > 2 && !stopWords.has(w));
-
-            words.forEach(w => {
-                wordCounts[w] = (wordCounts[w] || 0) + 1;
-            });
-        });
-
-        const threshold = Math.ceil(titles.length * 0.4); // 40% of tabs
-        const common = Object.entries(wordCounts)
-            .filter(([_, count]) => count >= threshold)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, maxWords)
-            .map(([word, _]) => this.capitalize(word));
-
-        return common;
-    }
-
-    /**
-     * Break tabs into sessions based on time gaps
-     */
-    breakIntoSessions(tabs) {
-        const sorted = [...tabs].sort((a, b) => (a.openTime || 0) - (b.openTime || 0));
-        const sessions = [];
-        if (sorted.length === 0) return sessions;
-
-        let currentSession = [sorted[0]];
-        sessions.push(currentSession);
-
-        for (let i = 1; i < sorted.length; i++) {
-            const prev = sorted[i - 1];
-            const curr = sorted[i];
-            const gap = (curr.openTime || 0) - (prev.openTime || 0);
-
-            if (gap > this.config.sessionGap) {
-                currentSession = [curr];
-                sessions.push(currentSession);
-            } else {
-                currentSession.push(curr);
-            }
-        }
-        return sessions;
-    }
-
-    /**
-     * Detect content intent: EXPLORATION vs REFERENCE vs GENERAL
-     */
-    detectContentType(title, url) {
-        const t = title.toLowerCase();
-        const u = url ? url.toLowerCase() : "";
-
-        // Exploration Signals (Search, Social, Discovery)
-        if (
-            t.includes("search") ||
-            t.includes("reddit") ||
-            t.includes("stackoverflow") ||
-            u.includes("google.com/search") ||
-            u.includes("reddit.com") ||
-            u.includes("twitter.com") ||
-            u.includes("youtube.com/results")
-        ) {
-            return "EXPLORATION";
-        }
-
-        // Reference Signals (Documentation, Guides)
-        if (
-            t.includes("documentation") ||
-            t.includes("docs") ||
-            t.includes("api reference") ||
-            t.includes("guide") ||
-            t.includes("mdn") ||
-            u.includes("developer.mozilla.org") ||
-            u.includes("react.dev") ||
-            u.includes("docs.") ||
-            u.includes("/documentation")
-        ) {
-            return "REFERENCE";
-        }
-
-        return "GENERAL";
-    }
-
-    /**
-     * Cosine Similarity calculation
-     */
-    cosineSimilarity(vecA, vecB) {
-        let dot = 0;
-        let normA = 0;
-        let normB = 0;
-        for (let i = 0; i < vecA.length; i++) {
-            dot += vecA[i] * vecB[i];
-            normA += vecA[i] ** 2;
-            normB += vecB[i] ** 2;
-        }
-        return dot / (Math.sqrt(normA) * Math.sqrt(normB) || 1);
-    }
-
-    /**
-     * Extract domain from URL
-     */
-    getDomain(urlStr) {
-        try {
-            const url = new URL(urlStr);
-            return url.hostname;
-        } catch (e) {
-            return "";
-        }
-    }
-
-    /**
-     * Calculate proximity score based on tab index distance
-     */
-    calculateProximityScore(indexA, indexB) {
-        const distance = Math.abs(indexA - indexB);
-        if (distance === 0) return 1.0;
-        if (distance > this.config.proximityWindow) return 0.0;
-
-        // Exponential decay: closer tabs get higher scores
-        return Math.exp(-distance / 3);
-    }
-
-    /**
-     * Build similarity graph with PROXIMITY WEIGHTING
-     * Formula: Total Score = (Semantic * 0.7) + (Proximity * 0.3)
-     */
-    buildSimilarityGraph(tabs) {
-        const edges = [];
-        const count = tabs.length;
-
-        for (let i = 0; i < count; i++) {
-            for (let j = i + 1; j < count; j++) {
-                const a = tabs[i];
-                const b = tabs[j];
-
-                // 1. Semantic Similarity
-                const semanticSim = this.cosineSimilarity(a.embedding, b.embedding);
-
-                if (semanticSim < 0.3) continue; // Early exit for very dissimilar tabs
-
-                // 2. Proximity Score (physical adjacency)
-                const proximitySim = this.calculateProximityScore(
-                    a.originalIndex,
-                    b.originalIndex
-                );
-
-                // 3. Combined Score with weighting
-                let totalScore =
-                    (semanticSim * this.config.weights.semantic) +
-                    (proximitySim * this.config.weights.proximity);
-
-                // 4. Affinity Boost: Exploration <-> Reference
-                const isAffinityPair =
-                    (a.type === "EXPLORATION" && b.type === "REFERENCE") ||
-                    (b.type === "EXPLORATION" && a.type === "REFERENCE");
-
-                if (isAffinityPair && semanticSim > 0.55) {
-                    totalScore += 0.1; // Boost for workflow pairs
-                }
-
-                // 5. Cookie Scenario: High semantic similarity + close proximity
-                const isCookieScenario =
-                    semanticSim >= this.config.cookieThreshold &&
-                    proximitySim > 0.5;
-
-                if (isCookieScenario) {
-                    totalScore += 0.05; // Extra boost for "cookie research" scenarios
-                }
-
-                // 6. Time-based adjustments
-                const timeDiff = Math.abs((a.openTime || 0) - (b.openTime || 0));
-
-                // Deduplication Penalty: Same title but far apart in time
-                if (a.title === b.title && timeDiff > 30 * 60 * 1000) {
-                    totalScore -= 0.2;
-                }
-
-                // 7. Domain penalty (prefer cross-domain semantic groups)
-                const sameDomain = a.domain === b.domain;
-                if (sameDomain) {
-                    totalScore *= 0.95; // Slight penalty (domain groups handled separately)
-                }
-
-                // 8. Create edge if score meets threshold
-                if (totalScore >= this.config.minSimilarity) {
-                    edges.push({
-                        source: a.id,
-                        target: b.id,
-                        weight: totalScore,
-                        debug: {
-                            semantic: semanticSim.toFixed(2),
-                            proximity: proximitySim.toFixed(2),
-                            combined: totalScore.toFixed(2)
-                        }
-                    });
-                }
-            }
-        }
-        return edges;
-    }
-
-    /**
-     * Find connected components using DFS
-     */
-    findConnectedComponents(tabs, edges) {
-        const adj = new Map();
-        tabs.forEach(t => adj.set(t.id, []));
-        edges.forEach(e => {
-            adj.get(e.source).push(e.target);
-            adj.get(e.target).push(e.source);
-        });
-
-        const visited = new Set();
-        const components = [];
-
-        for (const tab of tabs) {
-            if (!visited.has(tab.id)) {
-                const component = [];
-                const stack = [tab.id];
-                while (stack.length > 0) {
-                    const curr = stack.pop();
-                    if (visited.has(curr)) continue;
-                    visited.add(curr);
-                    component.push(curr);
-                    const neighbors = adj.get(curr) || [];
-                    for (const n of neighbors) {
-                        if (!visited.has(n)) stack.push(n);
-                    }
-                }
-                if (component.length > 0) {
-                    components.push(component);
-                }
-            }
-        }
-        return components;
-    }
-
-    /**
-     * Validate and score candidate groups
-     */
-    validateAndScore(sessionTabs, candidates) {
-        const validGroups = [];
-        const assignedIds = new Set();
-        const tabsMap = new Map(sessionTabs.map(t => [t.id, t]));
-
-        for (const memberIds of candidates) {
-            if (memberIds.length < this.config.minGroupSize) continue;
-
-            const groupTabs = memberIds.map(id => tabsMap.get(id));
-            let totalSim = 0;
-            let pairs = 0;
-            let minTime = Infinity;
-            let maxTime = -Infinity;
-            let minIndex = Infinity;
-            let maxIndex = -Infinity;
-
-            let hasReference = false;
-            let hasExploration = false;
-
-            for (let i = 0; i < groupTabs.length; i++) {
-                const t = groupTabs[i];
-                const time = t.openTime || 0;
-                const idx = t.originalIndex;
-
-                if (time < minTime) minTime = time;
-                if (time > maxTime) maxTime = time;
-                if (idx < minIndex) minIndex = idx;
-                if (idx > maxIndex) maxIndex = idx;
-
-                if (t.type === "REFERENCE") hasReference = true;
-                if (t.type === "EXPLORATION") hasExploration = true;
-
-                for (let j = i + 1; j < groupTabs.length; j++) {
-                    totalSim += this.cosineSimilarity(groupTabs[i].embedding, groupTabs[j].embedding);
-                    pairs++;
-                }
-            }
-
-            const avgSim = pairs > 0 ? totalSim / pairs : 1.0;
-            const spanMinutes = (maxTime - minTime) / (1000 * 60);
-            const indexSpan = maxIndex - minIndex;
-
-            // Time coherence: groups within 2 hours get higher scores
-            const timeCoherence = Math.max(0.5, 1.0 - (spanMinutes / 120));
-
-            // Proximity coherence: tabs close together get higher scores
-            const proximityCoherence = Math.max(0.5, 1.0 - (indexSpan / 20));
-
-            let confidence =
-                (this.config.weights.semantic * avgSim) +
-                (this.config.weights.time * timeCoherence) +
-                (this.config.weights.proximity * proximityCoherence);
-
-            // Affinity Bonus for complete workflows (search + docs)
-            if (hasReference && hasExploration) {
-                confidence += 0.05;
-            }
-
-            // Cookie Scenario Bonus: High avg similarity + tight proximity
-            if (avgSim >= this.config.cookieThreshold && indexSpan <= 10) {
-                confidence += 0.08;
-            }
-
-            if (confidence < this.config.minConfidence) continue;
-
-            const name = this.generateGroupName(groupTabs);
-
-            memberIds.forEach(id => assignedIds.add(id));
-            validGroups.push({
-                id: `grp_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-                title: name,
-                members: memberIds,
-                confidence: parseFloat(confidence.toFixed(2)),
-                type: 'semantic',
-                debug: {
-                    avgSim: avgSim.toFixed(2),
-                    timeSpan: spanMinutes.toFixed(0) + 'm',
-                    indexSpan: indexSpan,
-                    proximity: proximityCoherence.toFixed(2)
-                }
-            });
-        }
-
-        const ungrouped = sessionTabs.filter(t => !assignedIds.has(t.id)).map(t => t.id);
-        return { groups: validGroups, ungrouped };
-    }
-
-    /**
-     * Generate smart group name using frequency analysis
-     */
-    generateGroupName(groupTabs) {
-        const stopWords = new Set([
-            'the', 'and', 'or', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'from',
-            'up', 'about', 'into', 'over', 'after', 'new', 'tab', 'page', 'home', 'index', 'welcome',
-            'login', 'signup', 'sign', 'log', 'google', 'search', 'github', 'youtube', 'amazon',
-            'stackoverflow', 'reddit', 'facebook', 'twitter', 'linkedin', 'how', 'what', 'when',
-            'where', 'why', 'best', 'top', 'get', 'make', 'find'
-        ]);
-
-        // Priority: Use Reference Tab title if available (most authoritative)
-        const referenceTabs = groupTabs.filter(t => t.type === "REFERENCE");
-        if (referenceTabs.length > 0) {
-            // Extract key terms from reference docs
-            const refTitle = referenceTabs[0].title;
-            const words = refTitle.toLowerCase()
-                .replace(/[^a-z0-9 ]/g, ' ')
-                .split(/\s+/)
-                .filter(w => w.length > 2 && !stopWords.has(w))
-                .slice(0, 3);
-
-            if (words.length >= 2) {
-                return this.capitalize(words.slice(0, 2).join(' '));
-            }
-        }
-
-        return this.generateNameFromFrequency(groupTabs, stopWords);
-    }
-
-    /**
-     * Generate name from word/phrase frequency analysis
-     */
-    generateNameFromFrequency(groupTabs, stopWords) {
-        const wordCounts = {};
-        const phraseCounts = {};
-
-        groupTabs.forEach(tab => {
-            const clean = tab.title.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').trim();
-            const words = clean.split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
-
-            words.forEach(w => {
-                wordCounts[w] = (wordCounts[w] || 0) + 1;
-            });
-
-            // 2-word phrases
-            for (let i = 0; i < words.length - 1; i++) {
-                const phrase = `${words[i]} ${words[i + 1]}`;
-                phraseCounts[phrase] = (phraseCounts[phrase] || 0) + 1;
-            }
-        });
-
-        // Prefer phrases if they appear in 50%+ of tabs
-        const sortedPhrases = Object.entries(phraseCounts).sort((a, b) => b[1] - a[1]);
-        if (sortedPhrases.length > 0) {
-            const [bestPhrase, count] = sortedPhrases[0];
-            if (count >= Math.ceil(groupTabs.length * 0.5)) {
-                return this.capitalize(bestPhrase);
-            }
-        }
-
-        // Fall back to most common word
-        const sortedWords = Object.entries(wordCounts).sort((a, b) => b[1] - a[1]);
-        if (sortedWords.length > 0) {
-            const topWords = sortedWords.slice(0, 2).map(([word, _]) => word);
-            return this.capitalize(topWords.join(' '));
-        }
-
-        // Last resort: use domain
-        return this.capitalize(this.getDomain(groupTabs[0].url).split('.')[0] || "Group");
-    }
-
-    /**
-     * Capitalize words
-     */
-    capitalize(str) {
-        return str.split(' ').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
-    }
+  return groups;
 }

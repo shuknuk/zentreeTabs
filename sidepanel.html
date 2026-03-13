@@ -218,36 +218,12 @@
                     <div class="setting-row">
                         <div class="setting-label">
                             <span>Enable AI Organize</span>
-                            <span class="setting-desc">Group tabs by topic using AI (Smart Hybrid mode)</span>
+                            <span class="setting-desc">Group tabs by semantic context using AI</span>
                         </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="ai-enabled-toggle" checked>
                             <span class="toggle-slider"></span>
                         </label>
-                    </div>
-                    <div class="setting-row">
-                        <div class="setting-label">
-                            <span>
-                                Grouping Threshold
-                                <a href="https://shuknuk.github.io/zentreeTabs/docs/help.html#grouping-threshold" 
-                                   target="_blank" 
-                                   class="help-link" 
-                                   title="Learn more about grouping threshold">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <circle cx="12" cy="12" r="10"></circle>
-                                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-                                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                                    </svg>
-                                </a>
-                            </span>
-                            <span class="setting-desc">Minimum tabs per domain to auto-group (2-5)</span>
-                        </div>
-                        <select id="grouping-threshold-select" class="scheme-select">
-                            <option value="2" selected>2+ tabs</option>
-                            <option value="3">3+ tabs</option>
-                            <option value="4">4+ tabs</option>
-                            <option value="5">5+ tabs</option>
-                        </select>
                     </div>
                 </div>
 
@@ -325,6 +301,7 @@
         </div>
         <div class="context-menu-separator"></div>
         <div class="context-menu-item" id="ctx-rename">Change Name</div>
+        <div class="context-menu-item" id="ctx-nest-under">Nest Selected Under This Tab</div>
         <div class="context-menu-item" id="ctx-promote">Remove from Nested Head</div>
         <div class="context-menu-separator"></div>
         <div class="context-menu-item danger" id="ctx-close">Close Tab</div>

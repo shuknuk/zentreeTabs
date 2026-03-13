@@ -1,19 +1,19 @@
-import * as Transformers from "/lib/transformers.js";
-import { groupTabsBySemanticRules } from "./grouping.js";
+import * as Transformers from "./lib/transformers.js";
+import { groupTabsBySemanticRules } from "./worker/grouping.js";
 
 const pipelineFactory =
   Transformers.pipeline ||
   (Transformers.default && Transformers.default.pipeline) ||
-  self.transformers?.pipeline;
+  globalThis.transformers?.pipeline;
 const env =
   Transformers.env ||
   (Transformers.default && Transformers.default.env) ||
-  self.transformers?.env;
+  globalThis.transformers?.env;
 
 if (env?.backends?.onnx?.wasm) {
   env.backends.onnx.wasm.wasmPaths = {
-    "ort-wasm.wasm": self.location.origin + "/lib/ort-wasm.wasm",
-    "ort-wasm-simd.wasm": self.location.origin + "/lib/ort-wasm-simd.wasm",
+    "ort-wasm.wasm": chrome.runtime.getURL("lib/ort-wasm.wasm"),
+    "ort-wasm-simd.wasm": chrome.runtime.getURL("lib/ort-wasm-simd.wasm"),
   };
   env.backends.onnx.wasm.numThreads = 1;
   env.backends.onnx.wasm.proxy = false;
@@ -56,26 +56,31 @@ function toEmbeddingArrays(output) {
   return Array.isArray(output) ? output : [];
 }
 
-self.addEventListener("message", async (event) => {
-  if (event.data?.type !== "GROUP_TABS") {
-    return;
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== "OFFSCREEN_GROUP_TABS") {
+    return undefined;
   }
 
-  try {
+  (async () => {
+    if (!Array.isArray(message.tabs) || message.tabs.length < 2) {
+      return { ok: true, groups: [] };
+    }
+
     const pipeline = await getEmbeddingPipeline();
-    const output = await pipeline(
-      event.data.tabs.map((tab) => tab.context || ""),
-      { pooling: "mean", normalize: true },
-    );
+    const contexts = message.tabs.map((tab) => tab.context || "");
+    const output = await pipeline(contexts, {
+      pooling: "mean",
+      normalize: true,
+    });
+    const embeddings = toEmbeddingArrays(output);
+    const groups = groupTabsBySemanticRules(message.tabs, embeddings);
+    return { ok: true, groups };
+  })()
+    .then((result) => sendResponse(result))
+    .catch((error) => {
+      console.error("Offscreen grouping failed", error);
+      sendResponse({ ok: false, error: error.message || "Offscreen grouping failed." });
+    });
 
-    self.postMessage({
-      type: "GROUPS_GENERATED",
-      groups: groupTabsBySemanticRules(event.data.tabs, toEmbeddingArrays(output)),
-    });
-  } catch (error) {
-    self.postMessage({
-      type: "ERROR",
-      error: error.message || "AI worker grouping failed.",
-    });
-  }
+  return true;
 });

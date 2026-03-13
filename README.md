@@ -39,10 +39,11 @@ I built this because I wanted the organizational flow and aesthetic of browsers 
     <img src="public/nested tabs.png" alt="Nested Tabs Example" width="80%" />
   </div>
 - **Native Group Sync**: Chrome Tab Groups show up as folders. Collapsing a folder in the sidebar collapses the actual group in the top strip (and vice versa).
-- **Drag & Drop**: Smooth HTML5 drag-and-drop to reorder tabs or change the nesting hierarchy. You can also drag tabs directly into Group Headers.
+- **Drag & Drop**: Smooth HTML5 drag-and-drop across the full vertical tab row. Reordering follows the visible drop indicator line, so placement is determined by the nearest before/after indicator rather than requiring the cursor to sit directly on a row.
 - **Multi-Select**: Use `Ctrl/Cmd + Click` or `Shift + Click` to select multiple tabs for batch closing or grouping.
+- **Explicit Nesting**: Keep drag dedicated to reordering, then use multi-select plus the tab context menu to nest selected tabs under a parent tab without overloading the drag gesture.
 - **Enhanced Context Menu**: Right-click any tab for quick actions:
-  - Duplicate, reload, or mute/unmute tabs
+  - Duplicate, reload, mute/unmute, or nest selected tabs under the clicked tab
   - Smart edge detection ensures menu stays visible on screen
 
 - **AI Semantic Grouping (Beta)**: Local AI assistant that understands your research context.

@@ -1141,14 +1141,15 @@ body.flat-tabs .tab-item.active .tab-title {
 
 /* --- Groups --- */
 .group-node {
-    margin: 8px 0;
-    padding: 2px;
+    margin: 0;
+    padding: 0;
 }
 
 .group-header {
     display: flex;
     align-items: center;
-    padding: 8px 10px;
+    gap: 8px;
+    padding: 6px 8px;
     font-size: 11px;
     text-transform: uppercase;
     color: var(--text-secondary);
@@ -1165,17 +1166,12 @@ body.flat-tabs .tab-item.active .tab-title {
     color: var(--text-primary);
 }
 
-.group-header.drag-over {
-    background: var(--active-bg);
-    box-shadow: inset 0 0 0 2px var(--accent-color);
-}
-
 .group-dot {
     width: 10px;
     height: 10px;
     border-radius: 50%;
     background-color: var(--group-color);
-    margin-right: 10px;
+    margin-right: 0;
     box-shadow: 0 0 8px var(--group-color);
     /* Glow */
     opacity: 0.8;
@@ -1194,22 +1190,21 @@ body.flat-tabs .tab-item.active .tab-title {
 .tab-item {
     display: flex;
     align-items: center;
-    /* Increased padding for better balance */
-    padding: 11px 12px;
-    padding-left: 8px;
-    /* Increased vertical margin to reduce clumping */
-    margin: 4px 0;
-    /* Extend hover background to cover indentation */
-    margin-right: 8px;
+    gap: 8px;
+    padding: 5px 8px;
+    margin: 1px 0;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: all var(--transition-speed) ease;
+    transition:
+        background-color var(--transition-speed) ease,
+        box-shadow var(--transition-speed) ease,
+        border-color var(--transition-speed) ease,
+        transform 0.18s ease,
+        opacity 0.18s ease;
     user-select: none;
     position: relative;
     border: 1px solid transparent;
-    /* Space for border effect */
-    /* Improved line-height for readability */
-    line-height: 1.4;
+    line-height: 1.3;
 }
 
 /* Hover Effect - Full width glassy pill */
@@ -1217,9 +1212,7 @@ body.flat-tabs .tab-item.active .tab-title {
     background-color: var(--hover-bg);
     backdrop-filter: blur(4px);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
-    /* Extend hover background to the left edge */
-    margin-left: calc(var(--tab-depth, 0) * -28px);
-    padding-left: calc(8px + var(--tab-depth, 0) * 28px);
+    transform: translateX(2px);
 }
 
 /* Active State - Floating Glass */
@@ -1275,7 +1268,6 @@ body.shift-selecting .tab-tree-node.selected .tab-item:hover {
 .tab-favicon {
     width: 16px;
     height: 16px;
-    margin-right: 12px;
     border-radius: 3px;
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2)) brightness(1.05);
     flex-shrink: 0;
@@ -1283,6 +1275,7 @@ body.shift-selecting .tab-tree-node.selected .tab-item:hover {
 
 .tab-title {
     font-size: 13px;
+    line-height: 1.3;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1292,6 +1285,20 @@ body.shift-selecting .tab-tree-node.selected .tab-item:hover {
     color: var(--text-primary);
     opacity: 0.95;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+.suspended-badge {
+    font-size: 10px;
+    line-height: 1;
+    letter-spacing: 0.03em;
+    color: var(--text-secondary);
+    background: rgba(var(--accent-rgb, 59, 130, 246), 0.12);
+    border: 1px solid rgba(var(--accent-rgb, 59, 130, 246), 0.18);
+    border-radius: 999px;
+    padding: 3px 6px;
+    margin-left: 8px;
+    flex-shrink: 0;
+    align-self: center;
 }
 
 /* Better visibility in dark mode */
@@ -1316,6 +1323,7 @@ body.shift-selecting .tab-tree-node.selected .tab-item:hover {
 .rename-input {
     flex-grow: 1;
     font-size: 13px;
+    line-height: 1.3;
     border: 1px solid var(--accent-color);
     border-radius: 6px;
     padding: 4px 6px;
@@ -1387,29 +1395,29 @@ body.shift-selecting .tab-tree-node.selected .tab-item:hover {
     opacity: var(--tree-line-opacity);
 }
 
-/* Position guide line based on depth - aligned with chevron center (14px from left edge) */
+/* Position guide line based on depth - aligned to the updated 36px child indent rhythm */
 .tab-tree-node[data-depth="1"]::before {
-    left: 14px;
+    left: 18px;
 }
 
 .tab-tree-node[data-depth="2"]::before {
-    left: 42px;
-    /* 14px + 28px */
+    left: 54px;
+    /* 18px + 36px */
 }
 
 .tab-tree-node[data-depth="3"]::before {
-    left: 70px;
-    /* 14px + 56px */
+    left: 90px;
+    /* 18px + 72px */
 }
 
 .tab-tree-node[data-depth="4"]::before {
-    left: 98px;
-    /* 14px + 84px */
+    left: 126px;
+    /* 18px + 108px */
 }
 
 .tab-tree-node[data-depth="5"]::before {
-    left: 126px;
-    /* 14px + 112px */
+    left: 162px;
+    /* 18px + 144px */
 }
 
 /* L-shaped curve for last child - classic file explorer look */
@@ -1423,9 +1431,9 @@ body.shift-selecting .tab-tree-node.selected .tab-item:hover {
 .tab-tree-node[data-depth]:not([data-depth="0"]) .tab-item::after {
     content: "";
     position: absolute;
-    left: -14px;
+    left: -18px;
     top: 50%;
-    width: 14px;
+    width: 18px;
     height: 1px;
     background: var(--tree-line-color);
     opacity: var(--tree-line-opacity);
@@ -1731,6 +1739,14 @@ body.shift-selecting .tab-tree-node.selected .tab-item:hover {
     gap: 12px;
 }
 
+.bookmark-favicon {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    object-fit: contain;
+    align-self: center;
+}
+
 .download-item:hover {
     background: var(--active-bg);
     box-shadow: var(--glass-shadow);
@@ -1769,6 +1785,10 @@ body.shift-selecting .tab-tree-node.selected .tab-item:hover {
     color: var(--text-primary);
     display: block;
     cursor: pointer;
+    line-height: 1.35;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .download-title:hover {
@@ -2226,10 +2246,10 @@ body.flat-tabs .group-action-btn:hover {
 .tab-item.drop-above::before {
     content: "";
     position: absolute;
-    top: -2px;
+    top: -1px;
     left: 4px;
     right: 4px;
-    height: 3px;
+    height: 2px;
     background-color: var(--accent-color);
     border-radius: 2px;
     box-shadow: 0 0 6px var(--accent-glow);
@@ -2239,58 +2259,94 @@ body.flat-tabs .group-action-btn:hover {
 .tab-item.drop-below::after {
     content: "";
     position: absolute;
-    bottom: -2px;
+    bottom: -1px;
     left: 4px;
     right: 4px;
-    height: 3px;
+    height: 2px;
     background-color: var(--accent-color);
     border-radius: 2px;
     box-shadow: 0 0 6px var(--accent-glow);
     z-index: 20;
 }
 
-.tab-item.drop-inside {
-    background: var(--active-bg);
+.tab-item.drop-nest {
+    background: rgba(var(--accent-rgb, 59, 130, 246), 0.12);
+    border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.35);
     box-shadow:
-        inset 0 0 0 2px var(--accent-color),
-        0 0 12px var(--accent-glow);
+        inset 0 0 0 1px rgba(var(--accent-rgb, 59, 130, 246), 0.18),
+        0 0 10px rgba(var(--accent-rgb, 59, 130, 246), 0.14);
+    animation: nestPulse 1.15s ease-in-out infinite;
 }
 
-/* Drag Ghost Styling */
-.drag-ghost {
-    transform: scale(1.05) rotate(2deg);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
-    transition: none;
-    cursor: grabbing !important;
-    border-radius: var(--radius-sm);
-    backdrop-filter: blur(10px);
+.tab-item.drop-nest::after {
+    content: "Nest";
+    position: absolute;
+    inset: 3px 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: calc(var(--radius-sm) - 2px);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.04em;
+    color: var(--accent-color);
+    background: rgba(var(--accent-rgb, 59, 130, 246), 0.12);
+    border: 1px solid rgba(var(--accent-rgb, 59, 130, 246), 0.2);
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+    z-index: 21;
 }
 
-.drag-ghost * {
-    cursor: grabbing !important;
-}
-
-.drag-ghost .close-btn {
-    display: none;
+@keyframes nestPulse {
+    0% {
+        background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
+        border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.22);
+        box-shadow:
+            inset 0 0 0 1px rgba(var(--accent-rgb, 59, 130, 246), 0.12),
+            0 0 0 rgba(var(--accent-rgb, 59, 130, 246), 0);
+        transform: translateX(1px) scale(0.998);
+    }
+    50% {
+        background: rgba(var(--accent-rgb, 59, 130, 246), 0.13);
+        border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.3);
+        box-shadow:
+            inset 0 0 0 1px rgba(var(--accent-rgb, 59, 130, 246), 0.18),
+            0 0 12px rgba(var(--accent-rgb, 59, 130, 246), 0.12);
+        transform: translateX(2px) scale(1);
+    }
+    100% {
+        background: rgba(var(--accent-rgb, 59, 130, 246), 0.18);
+        border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.38);
+        box-shadow:
+            inset 0 0 0 1px rgba(var(--accent-rgb, 59, 130, 246), 0.22),
+            0 0 18px rgba(var(--accent-rgb, 59, 130, 246), 0.18);
+        transform: translateX(2px) scale(1.003);
+    }
 }
 
 /* Smooth transitions for tabs */
 .tab-tree-node {
     transition:
-        transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-        opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-        margin 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+        opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+        margin 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     will-change: transform, opacity;
 }
 
 .tab-tree-node.dragging {
-    opacity: 0.4;
-    transform: scale(0.98);
+    opacity: 0.7;
+    transform: scale(0.992);
 }
 
-/* Smooth flowing animation for other tabs */
-.tabs-list {
+.tabs-list,
+.group-body {
     position: relative;
+}
+
+.tabs-list>.tab-tree-node+.tab-tree-node,
+.group-body>.tab-tree-node+.tab-tree-node {
+    margin-top: 2px;
 }
 
 /* Cursor styles during drag */
@@ -2314,133 +2370,9 @@ body.flat-tabs .group-action-btn:hover {
 }
 
 .tab-item.dragging {
-    opacity: 0.4;
+    opacity: 0.55;
     pointer-events: none;
-}
-
-/* Hover to nest visual feedback */
-.tab-item.hover-nest {
-    background: rgba(var(--accent-color-rgb, 43, 107, 253), 0.1);
-    border-left: 3px solid rgba(var(--accent-color-rgb, 43, 107, 253), 0.4);
-    transition: all 0.2s ease;
-}
-
-.tab-item.nest-ready {
-    background: rgba(var(--accent-color-rgb, 43, 107, 253), 0.15);
-    border-left: 3px solid var(--accent-color);
-    box-shadow:
-        inset 0 0 0 2px rgba(var(--accent-color-rgb, 43, 107, 253), 0.3),
-        0 0 16px rgba(var(--accent-color-rgb, 43, 107, 253), 0.2);
-    animation: nestPulse 1s ease-in-out infinite;
-}
-
-@keyframes nestPulse {
-
-    0%,
-    100% {
-        box-shadow:
-            inset 0 0 0 2px rgba(var(--accent-color-rgb, 43, 107, 253), 0.3),
-            0 0 16px rgba(var(--accent-color-rgb, 43, 107, 253), 0.2);
-    }
-
-    50% {
-        box-shadow:
-            inset 0 0 0 2px rgba(var(--accent-color-rgb, 43, 107, 253), 0.5),
-            0 0 24px rgba(var(--accent-color-rgb, 43, 107, 253), 0.4);
-    }
-}
-
-/* Dark mode adjustments for hover-nest */
-@media (prefers-color-scheme: dark) {
-    :root:not(.force-light) .tab-item.hover-nest {
-        background: rgba(var(--accent-color-rgb, 43, 107, 253), 0.15);
-        border-left-color: rgba(var(--accent-color-rgb, 43, 107, 253), 0.5);
-    }
-
-    :root:not(.force-light) .tab-item.nest-ready {
-        background: rgba(var(--accent-color-rgb, 43, 107, 253), 0.2);
-    }
-}
-
-:root.force-dark .tab-item.hover-nest {
-    background: rgba(var(--accent-color-rgb, 43, 107, 253), 0.15);
-    border-left-color: rgba(var(--accent-color-rgb, 43, 107, 253), 0.5);
-}
-
-:root.force-dark .tab-item.nest-ready {
-    background: rgba(var(--accent-color-rgb, 43, 107, 253), 0.2);
-}
-
-/* Blocked nesting state */
-.tab-item.nest-blocked {
-    background: rgba(255, 68, 68, 0.1);
-    border-left: 3px solid rgba(255, 68, 68, 0.6);
-    transition: all 0.2s ease;
-}
-
-@media (prefers-color-scheme: dark) {
-    :root:not(.force-light) .tab-item.nest-blocked {
-        background: rgba(255, 68, 68, 0.15);
-        border-left-color: rgba(255, 68, 68, 0.7);
-    }
-}
-
-:root.force-dark .tab-item.nest-blocked {
-    background: rgba(255, 68, 68, 0.15);
-    border-left-color: rgba(255, 68, 68, 0.7);
-}
-
-/* Nest indicator tooltip */
-.nest-indicator {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 12px;
-    background: var(--accent-color);
-    color: white;
-    border-radius: 8px;
-    font-size: 12px;
-    font-weight: 600;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    opacity: 0;
-    animation: fadeInScale 0.2s ease forwards;
-    pointer-events: none;
-    white-space: nowrap;
-}
-
-.nest-indicator svg {
-    flex-shrink: 0;
-}
-
-@keyframes fadeInScale {
-    from {
-        opacity: 0;
-        transform: scale(0.9) translateY(-5px);
-    }
-
-    to {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
-}
-
-/* Prevent text selection during drag */
-body.dragging-in-progress {
-    user-select: none !important;
-    -webkit-user-select: none !important;
-    -moz-user-select: none !important;
-    -ms-user-select: none !important;
-}
-
-body.dragging-in-progress * {
-    cursor: grabbing !important;
-}
-
-/* Smooth reordering for non-dragged items */
-.tab-tree-node:not(.dragging) {
-    transition:
-        transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-        margin-top 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transform: scale(0.985);
 }
 
 /* AI Relocation Styles */

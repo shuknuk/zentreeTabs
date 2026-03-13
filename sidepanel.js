@@ -14,6 +14,7 @@ let pendingScrollTabId = null;
 let selectedTabs = new Set(); // Set of tabIds that are currently selected
 let lastClickedTabId = null; // Anchor tab for shift-select range
 let isInitialRender = true;
+let pendingRenderAfterDrag = false;
 
 const tabsListEl = document.getElementById("tabs-list");
 const searchInput = document.getElementById("tab-search");
@@ -40,9 +41,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   chrome.tabs.onRemoved.addListener(onTabRemoved);
   chrome.tabs.onActivated.addListener(onTabActivated);
   chrome.tabs.onMoved.addListener(onTabMoved);
+  chrome.tabs.onAttached.addListener(onTabAttached);
+  chrome.tabs.onDetached.addListener(onTabDetached);
 
   // UI Listeners
   searchInput.addEventListener("input", handleSearch);
+  tabsListEl.addEventListener("dragover", handleDragOver);
+  tabsListEl.addEventListener("drop", handleDrop);
 
   // Settings Modal Logic
   const settingsModal = document.getElementById("settings-modal");
@@ -150,21 +155,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Grouping Threshold Listener
-  const groupingThresholdSelect = document.getElementById("grouping-threshold-select");
-  if (groupingThresholdSelect) {
-    // Load saved setting (default is now 2)
-    chrome.storage.local.get({ groupingThreshold: 2 }, (res) => {
-      groupingThresholdSelect.value = res.groupingThreshold;
-    });
-    
-    // Save on change
-    groupingThresholdSelect.addEventListener("change", async () => {
-      const threshold = parseInt(groupingThresholdSelect.value);
-      await chrome.storage.local.set({ groupingThreshold: threshold });
-    });
-  }
-
   // Theme Logic
   await applyTheme();
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -247,8 +237,8 @@ async function fetchAndRenderTabs() {
   const groupsMap = new Map();
   groups.forEach((g) => groupsMap.set(g.id, g));
 
-  buildTree(tabs, groupsMap);
-  renderTree(groupsMap);
+  const { groupBuckets } = buildTree(tabs, groupsMap);
+  renderTree(groupsMap, groupBuckets);
 }
 
 /**
@@ -261,12 +251,10 @@ async function fetchAndRenderTabs() {
  * - rootTabs (Tabs with no parent AND no group)
  * - groupBuckets (Map<groupId, Array<tabId>>) -> Logic: Group acts as a root, Tree inside Group.
  */
-let groupBuckets = new Map(); // groupId -> Array<rootTabIds inside group>
-
 function buildTree(tabs, groupsMap) {
   tabsMap.clear();
-  groupBuckets.clear();
   rootTabs = [];
+  const groupBuckets = new Map();
 
   // Initialize buckets for known groups
   for (const groupId of groupsMap.keys()) {
@@ -355,13 +343,15 @@ function buildTree(tabs, groupsMap) {
   for (const [gid, roots] of groupBuckets) {
     roots.sort(sortFn);
   }
+
+  return { groupBuckets };
 }
 
 // --- Rendering ---
 
 // --- Rendering ---
 
-function renderTree(groupsMap) {
+function renderTree(groupsMap, groupBuckets = new Map()) {
   tabsListEl.innerHTML = "";
 
   // Filtered mode? (If searching)
@@ -449,51 +439,12 @@ function renderTree(groupsMap) {
 function createGroupNode(group, bucketTabIds) {
   const container = document.createElement("div");
   container.className = "group-node";
+  let isGroupCollapsed = group.collapsed;
 
   // Header
   const header = document.createElement("div");
   header.className = "group-header";
   header.style.setProperty("--group-color", mapColor(group.color));
-
-  // Click to Toggle Native Group
-  header.addEventListener("click", async () => {
-    try {
-      await chrome.tabGroups.update(group.id, { collapsed: !group.collapsed });
-      // The listener onUpdated will re-render
-    } catch (e) {
-      console.error("Failed to toggle group", e);
-    }
-  });
-
-  // --- Drop Target for Groups ---
-  // Allow dragging a tab INTO this group header/container
-  header.addEventListener("dragover", (e) => {
-    e.preventDefault(); // Essential to allow dropping
-    header.classList.add("drag-over");
-    e.dataTransfer.dropEffect = "move";
-  });
-
-  header.addEventListener("dragleave", (e) => {
-    header.classList.remove("drag-over");
-  });
-
-  header.addEventListener("drop", async (e) => {
-    e.preventDefault();
-    header.classList.remove("drag-over");
-
-    if (draggedTabId) {
-      try {
-        // Group the dragged tab into this group
-        // Note: This effectively "moves" it to the group visually.
-        await chrome.tabs.group({
-          tabIds: [draggedTabId],
-          groupId: group.id,
-        });
-      } catch (err) {
-        console.error("Failed to add tab to group:", err);
-      }
-    }
-  });
 
   // Expand Arrow
   const arrow = document.createElement("div");
@@ -515,15 +466,45 @@ function createGroupNode(group, bucketTabIds) {
 
   // Body
   const body = document.createElement("div");
-  body.className = `group-body ${group.collapsed ? "collapsed" : ""}`;
+  body.className = `group-body ${isGroupCollapsed ? "collapsed" : ""}`;
 
-  // Optimization: If collapsed, maybe don't even create children DOM?
-  // For now, simple display:none via class is fine for performance unless 1000s of tabs.
-  if (!group.collapsed) {
+  const renderGroupChildren = () => {
+    body.innerHTML = "";
+    if (isGroupCollapsed) {
+      return;
+    }
+
     bucketTabIds.forEach((tabId) => {
-      body.appendChild(createTabNode(tabId, 1)); // Start at depth 1 inside group
+      body.appendChild(createTabNode(tabId, 1));
     });
-  }
+  };
+
+  const syncGroupUI = (collapsed) => {
+    isGroupCollapsed = collapsed;
+    arrow.classList.toggle("rotated", !collapsed);
+    body.classList.toggle("collapsed", collapsed);
+    renderGroupChildren();
+  };
+
+  // Click to toggle the native group, but update the panel immediately.
+  header.addEventListener("click", async () => {
+    if (draggedTabId) return;
+
+    const nextCollapsed = !isGroupCollapsed;
+
+    try {
+      const updatedGroup = await chrome.tabGroups.update(group.id, {
+        collapsed: nextCollapsed,
+      });
+      syncGroupUI(updatedGroup.collapsed);
+      fetchAndRenderTabs();
+    } catch (e) {
+      console.error("Failed to toggle group", e);
+    }
+  });
+
+  // Optimization: don't render children for collapsed groups until expanded.
+  renderGroupChildren();
 
   container.appendChild(body);
   return container;
@@ -552,30 +533,36 @@ function createTabNode(tabId, depth = 0) {
   container.className = "tab-tree-node";
   container.dataset.tabId = tabId;
   container.dataset.depth = depth; // For CSS tree guide lines
+  container.draggable = true;
 
   // 1. Remote Tab Item (The visible row)
   const hasChildren = tab.children && tab.children.length > 0;
   const row = document.createElement("div");
   row.className = `tab-item ${tab.active ? "active" : ""} ${hasChildren ? "group-root" : ""}`;
-  row.draggable = true;
+  row.draggable = false;
 
-  // Indentation Logic - Parent tabs at left edge, children indented progressively
-  // Icons aligned on 28px grid for clear hierarchy
-  // Base padding for all tabs
-  row.style.paddingLeft = "8px";
-  // Set CSS custom property for hover effects
-  row.style.setProperty('--tab-depth', depth);
-  // Indent entire row based on depth: Level 0 = 0px, Level 1 = 28px, Level 2+ = +28px per level
+  // Indentation Logic - pull parent rows slightly left and step children further right.
+  row.style.paddingLeft = hasChildren ? "6px" : "8px";
+  row.style.setProperty("--tab-depth", depth);
   if (depth > 0) {
-    row.style.marginLeft = (depth * 28) + "px";
+    row.style.marginLeft = `${depth * 36}px`;
+  } else if (hasChildren) {
+    row.style.marginLeft = "-4px";
   }
 
   // Drag Events
-  row.addEventListener("dragstart", handleDragStart);
+  container.addEventListener("dragstart", handleDragStart);
   row.addEventListener("dragover", handleDragOver);
   row.addEventListener("drop", handleDrop);
-  row.addEventListener("dragend", handleDragEnd);
+  container.addEventListener("dragend", handleDragEnd);
   row.addEventListener("click", (e) => {
+    if (Date.now() < suppressRowClickUntil) {
+      suppressRowClickUntil = 0;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
     // Handle multi-select with Ctrl/Cmd+Click
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
@@ -672,6 +659,7 @@ function createTabNode(tabId, depth = 0) {
   // 2. Expand/Collapse Arrow
   const arrow = document.createElement("div");
   arrow.className = `expand-arrow ${hasChildren ? "" : "hidden"}`;
+  arrow.draggable = false;
   // Initialize rotation based on collapsed state
   const isCollapsed = collapsedState.has(tabId);
   if (!isCollapsed && hasChildren) {
@@ -689,6 +677,7 @@ function createTabNode(tabId, depth = 0) {
   // 3. Favicon
   const favicon = document.createElement("img");
   favicon.className = "tab-favicon";
+  favicon.draggable = false;
   favicon.src = getFaviconUrl(tab);
   favicon.onerror = () => {
     favicon.src =
@@ -699,6 +688,7 @@ function createTabNode(tabId, depth = 0) {
   // 4. Title
   const title = document.createElement("span");
   title.className = "tab-title";
+  title.draggable = false;
   title.textContent = customTitles.get(tabId) || tab.title;
   title.title = "Double-click to rename"; // Tooltip hint
 
@@ -710,6 +700,16 @@ function createTabNode(tabId, depth = 0) {
 
   row.appendChild(title);
 
+  if (isSuspendedTab(tab)) {
+    const suspendedBadge = document.createElement("span");
+    suspendedBadge.className = "suspended-badge";
+    suspendedBadge.textContent = "Zzz";
+    suspendedBadge.title = tab?.discarded
+      ? "Suspended by Chrome Memory Saver"
+      : "Suspended by The Marvellous Suspender";
+    row.appendChild(suspendedBadge);
+  }
+
   // Context Menu
   row.addEventListener("contextmenu", (e) => {
     showContextMenu(e, tabId);
@@ -718,6 +718,7 @@ function createTabNode(tabId, depth = 0) {
   // 5. Close Button
   const closeBtn = document.createElement("div");
   closeBtn.className = "close-btn";
+  closeBtn.draggable = false;
   closeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
   closeBtn.addEventListener("click", (e) => {
     e.stopPropagation(); // Prevent activation
@@ -798,8 +799,18 @@ chrome.tabGroups.onMoved.addListener(scheduleRender);
 // Debounce rendering to avoid flickering on rapid updates
 let renderTimeout;
 function scheduleRender() {
+  if (draggedTabId) {
+    pendingRenderAfterDrag = true;
+    return;
+  }
+
   if (renderTimeout) clearTimeout(renderTimeout);
   renderTimeout = setTimeout(() => {
+    renderTimeout = null;
+    if (draggedTabId) {
+      pendingRenderAfterDrag = true;
+      return;
+    }
     fetchAndRenderTabs();
   }, 50); // Small buffer
 }
@@ -837,77 +848,20 @@ function onTabMoved() {
   scheduleRender();
 }
 
-function onTabActivated(activeInfo) {
-  // Optimization: Don't re-render whole tree, just update class
-  const prevActive = document.querySelector(".tab-item.active");
-  if (prevActive) prevActive.classList.remove("active");
-
-  const newActiveContainer = document.querySelector(
-    `.tab-tree-node[data-tab-id="${activeInfo.tabId}"]`,
-  );
-  if (newActiveContainer) {
-    const newActive = newActiveContainer.querySelector(".tab-item");
-    if (newActive) {
-      newActive.classList.add("active");
-      // Scroll to view if not visible, using 'auto' to prevent erratic jumping
-      setTimeout(() => {
-        newActive.scrollIntoView({ behavior: "auto", block: "nearest" });
-      }, 10);
-    }
-  } else {
-    // Fallback if not found (e.g. new window or not rendered yet)
-    scheduleRender();
-  }
+function onTabActivated() {
+  scheduleRender();
 }
 
-function onTabUpdated(tabId, changeInfo, tab) {
-  // Optimization: Update specific fields directly in DOM
-  const container = document.querySelector(
-    `.tab-tree-node[data-tab-id="${tabId}"]`,
-  );
-  if (!container) {
-    // Tab not in DOM? structural change or new tab?
-    return scheduleRender();
-  }
+function onTabUpdated() {
+  scheduleRender();
+}
 
-  if (changeInfo.status === "loading") {
-    // Optional: Set favicon to spinner?
-    // For now, we can just ensure we re-fetch favicon if it changes
-  }
+function onTabAttached() {
+  scheduleRender();
+}
 
-  // Title Change
-  if (changeInfo.title) {
-    const titleEl = container.querySelector(".tab-title");
-    // Only update if not custom title (or if we want to sync)
-    if (titleEl && !customTitles.has(tabId)) {
-      titleEl.textContent = changeInfo.title;
-    }
-  }
-
-  // Favicon Change
-  if (changeInfo.favIconUrl) {
-    const faviconEl = container.querySelector(".tab-favicon");
-    if (faviconEl) {
-      faviconEl.src = getFaviconUrl(tab);
-    }
-  }
-
-  // Pinned status or Group change usually requires re-sort/re-structure
-  if (changeInfo.pinned !== undefined || changeInfo.groupId !== undefined) {
-    scheduleRender();
-  }
-
-  // Update context menu if mute state changes
-  if (changeInfo.mutedInfo !== undefined) {
-    // Update context menu if it's open for this tab
-    const menu = document.getElementById("tab-context-menu");
-    if (menu && contextMenuTabId === tabId) {
-      const muteText = document.getElementById("ctx-mute-text");
-      if (muteText) {
-        muteText.textContent = changeInfo.mutedInfo.muted ? "Unmute Tab" : "Mute Tab";
-      }
-    }
-  }
+function onTabDetached() {
+  scheduleRender();
 }
 
 // --- Persistence ---
@@ -943,10 +897,55 @@ async function saveCustomTitles() {
 
 // --- Icon Logic ---
 
+function getMarvelousSuspendersOriginalUrl(rawUrl) {
+  if (!rawUrl) {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(rawUrl);
+    const isMarvelousSuspendersPage =
+      parsedUrl.protocol === "chrome-extension:" &&
+      parsedUrl.pathname.endsWith("/suspended.html");
+
+    if (!isMarvelousSuspendersPage || !parsedUrl.hash) {
+      return null;
+    }
+
+    const hashParams = new URLSearchParams(parsedUrl.hash.slice(1));
+    const originalUrl = hashParams.get("uri");
+    if (!originalUrl) {
+      return null;
+    }
+
+    return decodeURIComponent(originalUrl);
+  } catch (error) {
+    return null;
+  }
+}
+
+function resolveOriginalPageUrl(rawUrl) {
+  return getMarvelousSuspendersOriginalUrl(rawUrl) || rawUrl;
+}
+
+function isSuspendedTab(tab) {
+  if (tab?.discarded) {
+    return true;
+  }
+
+  const rawUrl = tab?.pendingUrl || tab?.url || "";
+  return Boolean(getMarvelousSuspendersOriginalUrl(rawUrl));
+}
+
 function getFaviconUrl(tab) {
+  const rawUrl = resolveOriginalPageUrl(tab?.pendingUrl || tab?.url || "");
+  if (!rawUrl) {
+    return 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="%23ccc"><rect width="16" height="16" rx="2"/></svg>';
+  }
+
   // 1. Handle chrome:// and edge:// internal pages
-  if (tab.url.startsWith("chrome://") || tab.url.startsWith("edge://")) {
-    const url = new URL(tab.url);
+  if (rawUrl.startsWith("chrome://") || rawUrl.startsWith("edge://")) {
+    const url = new URL(rawUrl);
     const hostname = url.hostname;
 
     // Common System Icons (SVG Data URIs)
@@ -974,644 +973,355 @@ function getFaviconUrl(tab) {
   // 2. Use Chrome's cached favicon service (Robust for extensions and standard sites)
   // This requires 'favicon' permission in manifest.
   const url = new URL(chrome.runtime.getURL("/_favicon/"));
-  url.searchParams.set("pageUrl", tab.url);
+  url.searchParams.set("pageUrl", rawUrl);
   url.searchParams.set("size", "32");
   return url.toString();
 }
 
-// --- Drag & Drop (Smooth Flowing Animation) ---
+// --- Drag & Drop ---
 
 let draggedTabId = null;
-let draggedElement = null;
-let dragGhost = null;
+let draggedNode = null;
+let draggedRow = null;
+let currentDropTarget = null;
+let suppressRowClickUntil = 0;
+let hoverNestTargetId = null;
+let hoverNestTimer = null;
+let hoverNestActive = false;
 
-let lastDropTarget = null;
-let dragStartY = 0;
-let dragOffsetY = 0;
-let hoverTimer = null;
-let currentHoverTarget = null;
-let nestingMode = false;
-let nestIndicator = null;
-let rafId = null;
+function clearDropIndicator() {
+  document.querySelectorAll(".tab-item.drop-above, .tab-item.drop-below, .tab-item.drop-nest").forEach((el) => {
+    el.classList.remove("drop-above", "drop-below", "drop-nest");
+  });
+}
 
-function handleDragStart(e) {
-  draggedTabId = Number(this.parentNode.dataset.tabId);
-  draggedElement = this.parentNode;
-
-  // If dragging a selected tab and there are multiple selections, drag all of them
-  if (!selectedTabs.has(draggedTabId)) {
-    selectedTabs.clear();
-    selectedTabs.add(draggedTabId);
+function resetHoverNestState() {
+  if (hoverNestTimer) {
+    clearTimeout(hoverNestTimer);
+    hoverNestTimer = null;
   }
 
-  // Store the offset from the top of the element to the mouse
-  const rect = this.getBoundingClientRect();
-  dragOffsetY = e.clientY - rect.top;
-  dragStartY = e.clientY;
+  hoverNestTargetId = null;
+  hoverNestActive = false;
 
-  // Create a ghost element that follows the cursor
-  dragGhost = this.cloneNode(true);
-  dragGhost.classList.add("drag-ghost");
-  dragGhost.style.position = "fixed";
-  dragGhost.style.left = rect.left + "px";
-  dragGhost.style.top = rect.top + "px";
-  dragGhost.style.width = rect.width + "px";
-  dragGhost.style.pointerEvents = "none";
-  dragGhost.style.zIndex = "10000";
-  dragGhost.style.opacity = "0.9";
-  document.body.appendChild(dragGhost);
+  if (currentDropTarget?.type === "nest") {
+    currentDropTarget = null;
+  }
 
-  // Make the original semi-transparent
-  this.style.opacity = "0.3";
-  draggedElement.classList.add("dragging");
+  document.querySelectorAll(".tab-item.drop-nest").forEach((el) => {
+    el.classList.remove("drop-nest");
+  });
+}
 
-  // Add body class to prevent text selection
-  document.body.classList.add("dragging-in-progress");
+function startHoverNestTimer(targetTabId) {
+  hoverNestTargetId = targetTabId;
+  hoverNestActive = false;
+  hoverNestTimer = setTimeout(() => {
+    hoverNestTimer = null;
 
-  // Create nest indicator
-  nestIndicator = document.createElement("div");
-  nestIndicator.className = "nest-indicator";
-  nestIndicator.innerHTML = `
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <polyline points="9 18 15 12 9 6"></polyline>
-      <line x1="4" y1="12" x2="15" y2="12"></line>
-    </svg>
-    <span id="nest-indicator-text">Hold Shift for instant nest</span>
-  `;
-  nestIndicator.style.position = "absolute";
-  nestIndicator.style.pointerEvents = "none";
-  nestIndicator.style.zIndex = "101";
-  nestIndicator.style.display = "none";
-  tabsListEl.appendChild(nestIndicator);
+    if (!draggedTabId || hoverNestTargetId !== targetTabId) {
+      return;
+    }
 
-  e.dataTransfer.effectAllowed = "move";
-  // Use a transparent 1x1 pixel to hide default drag image
-  const img = new Image();
-  img.src =
-    "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-  e.dataTransfer.setDragImage(img, 0, 0);
+    if (!canNestUnderParent(draggedTabId, targetTabId)) {
+      resetHoverNestState();
+      return;
+    }
 
-  // Add global mouse move listener for smooth ghost movement
-  document.addEventListener("dragover", handleDragOver);
+    const targetRow = document.querySelector(
+      `.tab-tree-node[data-tab-id="${targetTabId}"] > .tab-item`,
+    );
+    if (!targetRow) {
+      resetHoverNestState();
+      return;
+    }
+
+    clearDropIndicator();
+    hoverNestActive = true;
+    currentDropTarget = { type: "nest", targetTabId };
+    targetRow.classList.add("drop-nest");
+  }, 500);
+}
+
+function canNestUnderParent(childTabId, parentTabId) {
+  if (!childTabId || !parentTabId || childTabId === parentTabId) {
+    return false;
+  }
+
+  const childTab = tabsMap.get(childTabId);
+  const parentTab = tabsMap.get(parentTabId);
+  if (!childTab || !parentTab) {
+    return false;
+  }
+
+  if (childTab.groupId !== parentTab.groupId) {
+    return false;
+  }
+
+  return !wouldCreateCycle(childTabId, parentTabId);
+}
+
+function getSubtreeTabIds(rootTabId, excludedTabId = null) {
+  const subtreeTabIds = [];
+
+  function visit(tabId) {
+    if (tabId === excludedTabId) {
+      return;
+    }
+
+    subtreeTabIds.push(tabId);
+    const tab = tabsMap.get(tabId);
+    if (!tab?.children?.length) {
+      return;
+    }
+
+    tab.children.forEach((childTabId) => visit(childTabId));
+  }
+
+  visit(rootTabId);
+  return subtreeTabIds;
+}
+
+function getNearestDropTarget(clientY) {
+  const rows = Array.from(tabsListEl.querySelectorAll(".tab-tree-node .tab-item"));
+  let nearest = null;
+
+  rows.forEach((row) => {
+    const node = row.closest(".tab-tree-node");
+    if (!node) {
+      return;
+    }
+
+    const tabId = Number(node.dataset.tabId);
+    if (tabId === draggedTabId) {
+      return;
+    }
+
+    const rect = row.getBoundingClientRect();
+    const candidates = [
+      {
+        row,
+        node,
+        rect,
+        position: "before",
+        distance: Math.abs(clientY - rect.top),
+      },
+      {
+        row,
+        node,
+        rect,
+        position: "after",
+        distance: Math.abs(clientY - rect.bottom),
+      },
+    ];
+
+    candidates.forEach((candidate) => {
+      if (!nearest || candidate.distance < nearest.distance) {
+        nearest = candidate;
+      }
+    });
+  });
+
+  return nearest;
+}
+
+function getNearestRow(clientY) {
+  const rows = Array.from(tabsListEl.querySelectorAll(".tab-tree-node .tab-item"));
+  let nearest = null;
+
+  rows.forEach((row) => {
+    const node = row.closest(".tab-tree-node");
+    if (!node) {
+      return;
+    }
+
+    const tabId = Number(node.dataset.tabId);
+    if (tabId === draggedTabId) {
+      return;
+    }
+
+    const rect = row.getBoundingClientRect();
+    const centerY = rect.top + rect.height / 2;
+    const distance = Math.abs(clientY - centerY);
+
+    if (!nearest || distance < nearest.distance) {
+      nearest = { row, node, rect, distance };
+    }
+  });
+
+  return nearest;
+}
+
+function handleDragStart(e) {
+  const container = e.currentTarget;
+  const row = container.querySelector(".tab-item");
+  if (!container) {
+    return;
+  }
+
+  draggedTabId = Number(container.dataset.tabId);
+  draggedNode = container;
+  draggedRow = row;
+  currentDropTarget = null;
+  resetHoverNestState();
+
+  if (draggedNode) {
+    draggedNode.classList.add("dragging");
+  }
+  if (draggedRow) {
+    draggedRow.classList.add("dragging");
+  }
+
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(draggedTabId));
+    e.dataTransfer.dropEffect = "move";
+  }
 }
 
 function handleDragOver(e) {
+  if (!draggedTabId) {
+    return;
+  }
+
   e.preventDefault();
-  e.dataTransfer.dropEffect = "move";
-
-  if (!draggedTabId) return;
-
-  // Cancel previous animation frame if any
-  if (rafId) {
-    cancelAnimationFrame(rafId);
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = "move";
   }
 
-  // Use requestAnimationFrame for smooth updates
-  rafId = requestAnimationFrame(() => {
-    // Update ghost position to follow cursor
-    if (dragGhost) {
-      dragGhost.style.top = e.clientY - dragOffsetY + "px";
-    }
+  clearDropIndicator();
+  const hoveredRow = e.target.closest(".tab-item");
+  const hoveredNode = hoveredRow?.closest(".tab-tree-node");
+  const hoveredTargetTabId = hoveredNode ? Number(hoveredNode.dataset.tabId) : null;
+  const hoveredIsValidNest =
+    hoveredTargetTabId && canNestUnderParent(draggedTabId, hoveredTargetTabId);
 
-    // Get cursor position relative to container
-    const containerRect = tabsListEl.getBoundingClientRect();
-    const cursorY = e.clientY - containerRect.top;
-
-    // Check if cursor is within the tabs list bounds
-    const isWithinBounds =
-      e.clientX >= containerRect.left &&
-      e.clientX <= containerRect.right &&
-      e.clientY >= containerRect.top &&
-      e.clientY <= containerRect.bottom;
-
-    if (!isWithinBounds) {
-      // Hide indicators when outside the tabs area
-      if (nestIndicator) {
-        nestIndicator.style.display = "none";
-      }
-      clearHoverTimer();
-      nestingMode = false;
-      currentHoverTarget = null;
-      document
-        .querySelectorAll(
-          ".tab-item.hover-nest, .tab-item.nest-blocked, .tab-item.nest-ready",
-        )
-        .forEach((el) => {
-          el.classList.remove("hover-nest", "nest-blocked", "nest-ready");
-        });
-      return;
-    }
-
-    // Find the closest tab item under the cursor
-    const afterElement = getDragAfterElement(tabsListEl, e.clientY);
-    const targetElement = afterElement ? afterElement.element : null;
-
-    updateDropIndicator(e, targetElement, cursorY, containerRect);
-  });
-}
-
-function updateDropIndicator(e, targetElement, cursorY, containerRect) {
-  // Clear all previous drop indicators
-  document
-    .querySelectorAll(
-      ".tab-item.drop-above, .tab-item.drop-below, .tab-item.drop-inside, .tab-item.hover-nest, .tab-item.nest-blocked",
-    )
-    .forEach((el) => {
-      el.classList.remove(
-        "drop-above",
-        "drop-below",
-        "drop-inside",
-        "hover-nest",
-        "nest-blocked",
-      );
-    });
-
-  if (!targetElement) {
-    // Dragging at the end
-    clearHoverTimer();
-    nestingMode = false;
+  if (!hoveredIsValidNest) {
+    resetHoverNestState();
+  } else if (hoverNestTargetId !== hoveredTargetTabId) {
+    resetHoverNestState();
+    startHoverNestTimer(hoveredTargetTabId);
+  } else if (hoverNestActive) {
+    currentDropTarget = { type: "nest", targetTabId: hoveredTargetTabId };
+    hoveredRow.classList.add("drop-nest");
     return;
   }
 
-  const targetTabId = Number(targetElement.dataset.tabId);
-  if (targetTabId === draggedTabId) {
-    clearHoverTimer();
-    nestingMode = false;
+  const nearestRow = getNearestRow(e.clientY);
+  if (!nearestRow) {
+    resetHoverNestState();
+    currentDropTarget = null;
     return;
   }
 
-  const targetRow = targetElement.querySelector(".tab-item");
-  if (!targetRow) return;
-
-  const rect = targetElement.getBoundingClientRect();
-  const elementTop = rect.top - containerRect.top;
-  const elementBottom = rect.bottom - containerRect.top;
-  const elementHeight = elementBottom - elementTop;
-  const elementMiddle = elementTop + elementHeight / 2;
-
-  // Define zones: 25% top, 50% middle (hover for nest), 25% bottom
-  const topZone = elementTop + elementHeight * 0.25;
-  const bottomZone = elementTop + elementHeight * 0.75;
-
-  // Check if we can nest (prevent cycles - can't nest into own child)
-  const draggedSubtree = getSubtree(draggedTabId);
-  const canNest = !draggedSubtree.includes(targetTabId);
-
-  if (cursorY < topZone) {
-    // Top zone - show drop-above indicator
-    clearHoverTimer();
-    nestingMode = false;
-    currentHoverTarget = null;
-
-    document.querySelectorAll(".tab-item.nest-ready").forEach((el) => {
-      el.classList.remove("nest-ready");
-    });
-
-    // Hide nest indicator
-    if (nestIndicator) {
-      nestIndicator.style.display = "none";
-    }
-
-    // Add drop-above indicator
-    targetRow.classList.add("drop-above");
-  } else if (cursorY > bottomZone) {
-    // Bottom zone - show drop-below indicator
-    clearHoverTimer();
-    nestingMode = false;
-    currentHoverTarget = null;
-
-    document.querySelectorAll(".tab-item.nest-ready").forEach((el) => {
-      el.classList.remove("nest-ready");
-    });
-
-    // Hide nest indicator
-    if (nestIndicator) {
-      nestIndicator.style.display = "none";
-    }
-
-    // Add drop-below indicator
-    targetRow.classList.add("drop-below");
-  } else {
-    // Middle zone - show nesting intent (only if nesting is valid)
-    if (canNest) {
-      targetRow.classList.add("hover-nest");
-    } else {
-      // Show that nesting is not allowed
-      targetRow.classList.add("nest-blocked");
-      clearHoverTimer();
-      nestingMode = false;
-      if (nestIndicator) {
-        nestIndicator.style.display = "none";
-      }
-      return;
-    }
-
-    // Check if Shift key is held for instant nesting
-    const instantNest = e.shiftKey;
-
-    // Update indicator text based on Shift key state
-    const nestIndicatorText = document.getElementById("nest-indicator-text");
-    if (nestIndicatorText) {
-      nestIndicatorText.textContent = instantNest
-        ? "Nest inside"
-        : "Hold Shift for instant nest";
-    }
-
-    // If Shift is pressed and we're already hovering over the same target, activate immediately
-    if (instantNest && currentHoverTarget === targetTabId && !nestingMode) {
-      clearHoverTimer();
-      nestingMode = true;
-      targetRow.classList.add("nest-ready");
-      targetRow.classList.add("drop-inside");
-      if (nestIndicator) {
-        const targetRect = targetRow.getBoundingClientRect();
-        const containerRect = tabsListEl.getBoundingClientRect();
-        nestIndicator.style.top =
-          targetRect.top -
-          containerRect.top +
-          targetRect.height / 2 -
-          15 +
-          "px";
-        nestIndicator.style.left =
-          targetRect.left -
-          containerRect.left +
-          targetRect.width / 2 -
-          60 +
-          "px";
-        nestIndicator.style.display = "flex";
-      }
-    }
-
-    // Start hover timer if this is a new target (or instant nest with Shift)
-    if (currentHoverTarget !== targetTabId) {
-      clearHoverTimer();
-      currentHoverTarget = targetTabId;
-
-      const nestDelay = instantNest ? 0 : 400; // Instant with Shift, 400ms otherwise
-
-      hoverTimer = setTimeout(() => {
-        nestingMode = true;
-        targetRow.classList.add("nest-ready");
-        targetRow.classList.add("drop-inside");
-        // Show nest indicator
-        if (nestIndicator) {
-          const targetRect = targetRow.getBoundingClientRect();
-          const containerRect = tabsListEl.getBoundingClientRect();
-          nestIndicator.style.top =
-            targetRect.top -
-            containerRect.top +
-            targetRect.height / 2 -
-            15 +
-            "px";
-          nestIndicator.style.left =
-            targetRect.left -
-            containerRect.left +
-            targetRect.width / 2 -
-            60 +
-            "px";
-          nestIndicator.style.display = "flex";
-        }
-      }, nestDelay);
-    }
-
-    // If already in nesting mode, show nest indicator
-    if (nestingMode) {
-      targetRow.classList.add("drop-inside");
-      if (nestIndicator) {
-        const targetRect = targetRow.getBoundingClientRect();
-        const containerRect = tabsListEl.getBoundingClientRect();
-        nestIndicator.style.top =
-          targetRect.top -
-          containerRect.top +
-          targetRect.height / 2 -
-          15 +
-          "px";
-        nestIndicator.style.left =
-          targetRect.left -
-          containerRect.left +
-          targetRect.width / 2 -
-          60 +
-          "px";
-        nestIndicator.style.display = "flex";
-      }
-    }
+  if (hoverNestActive && hoverNestTargetId === hoveredTargetTabId && hoveredRow) {
+    currentDropTarget = { type: "nest", targetTabId: hoveredTargetTabId };
+    hoveredRow.classList.add("drop-nest");
+    return;
   }
 
-  rafId = null;
-}
-
-function clearHoverTimer() {
-  if (hoverTimer) {
-    clearTimeout(hoverTimer);
-    hoverTimer = null;
+  const nearestTarget = getNearestDropTarget(e.clientY);
+  if (!nearestTarget) {
+    resetHoverNestState();
+    currentDropTarget = null;
+    return;
   }
-  document
-    .querySelectorAll(
-      ".tab-item.hover-nest, .tab-item.nest-ready, .tab-item.nest-blocked",
-    )
-    .forEach((el) => {
-      el.classList.remove("hover-nest", "nest-ready", "nest-blocked");
-    });
-  if (nestIndicator) {
-    nestIndicator.style.display = "none";
-  }
-}
 
-function getDragAfterElement(container, y) {
-  const draggableElements = [
-    ...container.querySelectorAll(".tab-tree-node:not(.dragging)"),
-  ];
-
-  return draggableElements.reduce(
-    (closest, child) => {
-      const box = child.getBoundingClientRect();
-      const offset = y - box.top - box.height / 2;
-
-      if (offset < 0 && offset > closest.offset) {
-        return { offset: offset, element: child };
-      } else {
-        return closest;
-      }
-    },
-    { offset: Number.NEGATIVE_INFINITY },
+  currentDropTarget = {
+    type: "reorder",
+    targetTabId: Number(nearestTarget.node.dataset.tabId),
+    position: nearestTarget.position,
+  };
+  nearestTarget.row.classList.add(
+    nearestTarget.position === "before" ? "drop-above" : "drop-below",
   );
 }
 
-function handleDragEnd(e) {
-  // Cleanup
-  if (rafId) {
-    cancelAnimationFrame(rafId);
-    rafId = null;
+function handleDragEnd() {
+  resetHoverNestState();
+  clearDropIndicator();
+  if (draggedNode) {
+    draggedNode.classList.remove("dragging");
   }
-
-  clearHoverTimer();
-
-  if (dragGhost) {
-    dragGhost.remove();
-    dragGhost = null;
+  if (draggedRow) {
+    draggedRow.classList.remove("dragging");
   }
-
-  if (nestIndicator) {
-    nestIndicator.remove();
-    nestIndicator = null;
-  }
-
-  if (draggedElement) {
-    const draggedRow = draggedElement.querySelector(".tab-item");
-    if (draggedRow) {
-      draggedRow.style.opacity = "";
-    }
-    draggedElement.classList.remove("dragging");
-    draggedElement = null;
-  }
-
-  document.querySelectorAll(".tab-item").forEach((el) => {
-    el.classList.remove(
-      "drag-over",
-      "drop-above",
-      "drop-inside",
-      "drop-below",
-      "hover-nest",
-      "nest-ready",
-      "nest-blocked",
-    );
-  });
-
-  // Remove global listener
-  document.removeEventListener("dragover", handleDragOver);
-
-  // Remove body class
-  document.body.classList.remove("dragging-in-progress");
-
+  suppressRowClickUntil = Date.now() + 250;
   draggedTabId = null;
-  lastDropTarget = null;
-  currentHoverTarget = null;
-  nestingMode = false;
+  draggedNode = null;
+  draggedRow = null;
+  currentDropTarget = null;
+
+  if (pendingRenderAfterDrag) {
+    pendingRenderAfterDrag = false;
+    scheduleRender();
+  }
 }
 
 async function handleDrop(e) {
-  e.stopPropagation();
   e.preventDefault();
+  e.stopPropagation();
 
-  if (!draggedTabId) {
-    handleDragEnd(e);
+  const draggedId = draggedTabId || Number(e.dataTransfer?.getData("text/plain"));
+  const dropTarget = currentDropTarget;
+  if (!draggedId || !dropTarget) {
+    handleDragEnd();
     return;
   }
 
-  // Find where to drop
-  const afterElement = getDragAfterElement(tabsListEl, e.clientY);
-  const targetElement = afterElement ? afterElement.element : null;
-
-  if (!targetElement) {
-    // Drop at the end - move to last position
-    try {
-      const allTabs = await chrome.tabs.query({ currentWindow: true });
-      const maxIndex = Math.max(...allTabs.map((t) => t.index));
-
-      // Don't move if already at the end
-      const draggedTab = tabsMap.get(draggedTabId);
-      if (draggedTab && draggedTab.index < maxIndex) {
-        await chrome.tabs.move(draggedTabId, { index: maxIndex });
-
-        // Update parent override to root
-        parentOverrides.set(draggedTabId, -1);
-        await saveParentOverrides();
-      }
-    } catch (err) {
-      console.error("Move failed", err);
-    }
-    handleDragEnd(e);
-    return;
-  }
-
-  const targetTabId = Number(targetElement.dataset.tabId);
-  if (targetTabId === draggedTabId) {
-    handleDragEnd(e);
-    return;
-  }
-
-  // Check if we're in nesting mode
-  if (nestingMode) {
-    // Verify we can still nest (prevent cycles)
-    const draggedSubtree = getSubtree(draggedTabId);
-    if (!draggedSubtree.includes(targetTabId)) {
-      // Nest the dragged tab as a child of the target
-      await moveTabTree(draggedTabId, targetTabId, "nest");
-    }
-    handleDragEnd(e);
-    return;
-  }
-
-  // Determine if dropping above or below based on Y position
-  const rect = targetElement.getBoundingClientRect();
-  const containerRect = tabsListEl.getBoundingClientRect();
-  const y = e.clientY - containerRect.top;
-  const elementTop = rect.top - containerRect.top;
-  const elementBottom = rect.bottom - containerRect.top;
-  const elementHeight = elementBottom - elementTop;
-
-  // Define zones: 25% top, 50% middle, 25% bottom
-  const topZone = elementTop + elementHeight * 0.25;
-  const bottomZone = elementTop + elementHeight * 0.75;
-
-  let action;
-  if (y < topZone) {
-    action = "before";
-  } else if (y > bottomZone) {
-    action = "after";
-  } else {
-    // Middle zone - nest it
-    action = "nest";
-  }
-
-  await moveTabTree(draggedTabId, targetTabId, action);
-  handleDragEnd(e);
-}
-
-// --- Tree Move Logic ---
-
-async function moveTabTree(sourceId, targetId, action) {
-  // 1. Get entire subtree of source
-  const movingIds = getSubtree(sourceId);
-
-  // Prevent moving a parent into its own child (cycle)
-  if (movingIds.includes(targetId)) {
-    console.warn("Cannot move parent into its own child");
-    return;
-  }
-
-  // 2. Determine new Parent and new Index
-  await loadParentOverrides(); // Sync latest state
-
-  let newParentId = null;
-  let targetIndex = -1;
-
-  const targetTab = tabsMap.get(targetId);
-  if (!targetTab) return;
-
-  if (action === "nest") {
-    // A becomes child of B
-    newParentId = targetId;
-
-    // Append to the end of B's children
-    // We need to find the flat index of the LAST descendant of B
-    const targetSubtree = getSubtree(targetId);
-    const lastDescendantId = targetSubtree[targetSubtree.length - 1];
-    const lastDescendant = tabsMap.get(lastDescendantId);
-
-    // Target index is after the last descendant
-    targetIndex = lastDescendant.index + 1;
-
-    // Determine offset: if we are moving DOWN, the target index logic works.
-    // If we are moving UP, indices shift. Chrome.tabs.move handles the shift if "index" is used correctly
-    // relative to CURRENT layout.
-    // Note: references to 'index' are from BEFORE the move.
-    // If source is BEFORE target, moving it effectively subtracts from target's index.
-    // Safer to just say: "Place it at X".
-  } else if (action === "before") {
-    // A becomes sibling of B, placed immediately before B
-
-    // Parent is same as B's parent
-    const parentOfTarget = parentOverrides.get(targetId);
-    // If undefined, check internal map or assume root (null if explicitly -1 or missing)
-    // We can just rely on what our 'buildTree' logic thinks B's parent is.
-    // BUT logic needs to match `parentOverrides` structure.
-    // Let's look up B's current effective parent.
-    newParentId = parentOverrides.get(targetId);
-    if (newParentId === undefined) {
-      // If not overridden, could be opener.
-      // But for consistent DragDrop we usually "break" opener bond and make it explicit root or child.
-      // If B is root (null), A becomes root.
-      // Since we don't have easy access to "effective parent" safely without re-running hierarchy logic,
-      // let's peek at the DOM or simplify?
-      // Actually, `tabsMap` doesn't store computed parent easily.
-
-      // Let's assume: if target is a Root in UI, new parent is null (-1).
-      if (rootTabs.includes(targetId)) newParentId = -1;
-      else {
-        // Find who claims B as child
-        // Expensive reverse lookup? Or just stick to explicit overrides?
-        // If we don't know, we default to -1 (Root) or keep existing parent?
-        // Better approach: Look at the DOM structure!
-        const targetNode = document.querySelector(
-          `.tab-tree-node[data-tab-id="${targetId}"]`,
-        );
-        const parentNode = targetNode.parentElement.closest(".tab-tree-node");
-        if (parentNode) {
-          newParentId = Number(parentNode.dataset.tabId);
-        } else {
-          newParentId = -1; // Root
-        }
-      }
-    }
-
-    // Index: B's current index
-    targetIndex = targetTab.index;
-  } else if (action === "after") {
-    // A becomes sibling of B, placed after B (and B's subtree)
-
-    // Parent: Same as 'before' case
-    const targetNode = document.querySelector(
-      `.tab-tree-node[data-tab-id="${targetId}"]`,
-    );
-    const parentNode = targetNode.parentElement.closest(".tab-tree-node");
-    if (parentNode) {
-      newParentId = Number(parentNode.dataset.tabId);
-    } else {
-      newParentId = -1;
-    }
-
-    // Index: After B's entire subtree
-    const targetSubtree = getSubtree(targetId);
-    const lastDescendantId = targetSubtree[targetSubtree.length - 1];
-    const lastDescendant = tabsMap.get(lastDescendantId);
-
-    targetIndex = lastDescendant.index + 1;
-  }
-
-  // 3. Update Visual/Internal Hierarchy (Parent Overrides)
-  // We only update the ROOT of the moving subtree
-  if (newParentId === -1) {
-    // Explicit root: delete override if we want to revert to opener?
-    // No, we want to FORCE root. So set to -1.
-    parentOverrides.set(sourceId, -1);
-  } else if (newParentId) {
-    parentOverrides.set(sourceId, newParentId);
-  } else {
-    // undefined/null? Treat as root usually or keep existing.
-    // Safest is explicit -1 if we mean root.
-    // If we matched a parent, set it.
-  }
-
-  await saveParentOverrides();
-
-  // 4. Perform the Move (Chrome Tabs API)
-  // We move the entire subtree to the new index.
-  // NOTE: indices change as we move items.
-  // Chrome API allows moving multiple tabs at once! `chrome.tabs.move(tabIds, {index})`
-  // This is atomic and handles shifting much better.
+  const { targetTabId } = dropTarget;
 
   try {
-    await chrome.tabs.move(movingIds, { index: targetIndex });
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    const orderedTabs = tabs.slice().sort((a, b) => a.index - b.index);
+    const draggedTab = orderedTabs.find((tab) => tab.id === draggedId);
+    const targetTab = orderedTabs.find((tab) => tab.id === targetTabId);
 
-    // Force immediate re-render to sync visual state with Chrome
-    await fetchAndRenderTabs();
+    if (!draggedTab || !targetTab) {
+      return;
+    }
+
+    if (dropTarget.type === "nest") {
+      if (!canNestUnderParent(draggedId, targetTabId)) {
+        return;
+      }
+
+      parentOverrides.set(draggedId, targetTabId);
+      await saveParentOverrides();
+
+      const targetSubtreeTabIds = getSubtreeTabIds(targetTabId, draggedId);
+      const lastTargetSubtreeIndex = targetSubtreeTabIds.reduce((maxIndex, tabId) => {
+        const tab = orderedTabs.find((candidate) => candidate.id === tabId);
+        return tab ? Math.max(maxIndex, tab.index) : maxIndex;
+      }, targetTab.index);
+
+      let destinationIndex = lastTargetSubtreeIndex + 1;
+      if (draggedTab.index < destinationIndex) {
+        destinationIndex -= 1;
+      }
+
+      if (destinationIndex !== draggedTab.index) {
+        await chrome.tabs.move(draggedId, { index: destinationIndex });
+      }
+      await fetchAndRenderTabs();
+      return;
+    }
+
+    let destinationIndex =
+      targetTab.index + (dropTarget.position === "after" ? 1 : 0);
+    if (draggedTab.index < destinationIndex) {
+      destinationIndex -= 1;
+    }
+
+    if (destinationIndex !== draggedTab.index) {
+      await chrome.tabs.move(draggedId, { index: destinationIndex });
+      await fetchAndRenderTabs();
+    }
   } catch (err) {
     console.error("Move failed", err);
-    // Fallback: re-render to at least show current state (even if move failed)
-    await fetchAndRenderTabs();
+  } finally {
+    handleDragEnd();
   }
-}
-
-function getSubtree(rootId) {
-  const results = [rootId];
-  const tab = tabsMap.get(rootId);
-  if (tab && tab.children) {
-    for (const childId of tab.children) {
-      results.push(...getSubtree(childId));
-    }
-  }
-  return results;
 }
 
 // Hierarchy Override for Drag & Drop
@@ -1629,6 +1339,70 @@ async function saveParentOverrides() {
   await chrome.storage.local.set({
     parentOverrides: Object.fromEntries(parentOverrides),
   });
+}
+
+function getTabParentId(tabId) {
+  const overrideParentId = parentOverrides.get(tabId);
+  if (overrideParentId !== undefined) {
+    return overrideParentId === -1 ? null : overrideParentId;
+  }
+
+  const tab = tabsMap.get(tabId);
+  return tab?.openerTabId && tabsMap.has(tab.openerTabId) ? tab.openerTabId : null;
+}
+
+function wouldCreateCycle(childId, nextParentId) {
+  let currentParentId = nextParentId;
+
+  while (currentParentId) {
+    if (currentParentId === childId) {
+      return true;
+    }
+    currentParentId = getTabParentId(currentParentId);
+  }
+
+  return false;
+}
+
+function getNestingCandidates(parentTabId) {
+  const parentTab = tabsMap.get(parentTabId);
+  if (!parentTab) {
+    return [];
+  }
+
+  return Array.from(selectedTabs).filter((childTabId) => {
+    if (childTabId === parentTabId) {
+      return false;
+    }
+
+    const childTab = tabsMap.get(childTabId);
+    if (!childTab) {
+      return false;
+    }
+
+    if (childTab.groupId !== parentTab.groupId) {
+      return false;
+    }
+
+    return !wouldCreateCycle(childTabId, parentTabId);
+  });
+}
+
+async function nestTabsUnderParent(parentTabId, childTabIds) {
+  if (!childTabIds.length) {
+    return;
+  }
+
+  childTabIds.forEach((childTabId) => {
+    parentOverrides.set(childTabId, parentTabId);
+  });
+
+  await saveParentOverrides();
+  selectedTabs.clear();
+  if (window.updateSelectionToolbar) {
+    window.updateSelectionToolbar();
+  }
+  await fetchAndRenderTabs();
 }
 
 // --- Bookmarks Logic ---
@@ -2268,6 +2042,7 @@ function createGroupManagementNode(group, tabs) {
     e.stopPropagation();
     try {
       await chrome.tabGroups.update(group.id, { collapsed: !group.collapsed });
+      fetchAndRenderTabs();
       fetchAndRenderGroups();
     } catch (err) {
       console.error("Failed to toggle group", err);
@@ -2310,6 +2085,7 @@ function createGroupManagementNode(group, tabs) {
     try {
       const tabIds = tabs.map((t) => t.id);
       await chrome.tabs.ungroup(tabIds);
+      fetchAndRenderTabs();
       fetchAndRenderGroups();
     } catch (err) {
       console.error("Failed to ungroup", err);
@@ -2384,7 +2160,10 @@ function showRenameDialog(group) {
   if (newTitle !== null) {
     chrome.tabGroups
       .update(group.id, { title: newTitle })
-      .then(() => fetchAndRenderGroups())
+      .then(() => {
+        fetchAndRenderTabs();
+        fetchAndRenderGroups();
+      })
       .catch((err) => console.error("Failed to rename group", err));
   }
 }
@@ -2434,6 +2213,7 @@ function selectGroupColor(colorId) {
     chrome.tabGroups
       .update(currentGroupForColorPicker.id, { color: colorId })
       .then(() => {
+        fetchAndRenderTabs();
         fetchAndRenderGroups();
         closeColorPicker();
       })
@@ -2516,11 +2296,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (selectedTabs.size > 0) {
         const tabIds = Array.from(selectedTabs);
         try {
-          const group = await chrome.tabs.group({ tabIds });
-          const groupTitle = prompt("Enter group name (optional):");
-          if (groupTitle) {
-            await chrome.tabGroups.update(group, { title: groupTitle });
-          }
+          await chrome.tabs.group({ tabIds });
           selectedTabs.clear();
           updateSelectionToolbar();
           fetchAndRenderTabs();
@@ -2602,8 +2378,31 @@ document.addEventListener("DOMContentLoaded", () => {
   setupAI();
 });
 
-let aiWorker = null;
 let preGroupingState = null; // Store tab states before AI grouping
+
+function showAIStatus(statusEl, text, color = "") {
+  if (!statusEl) return;
+  statusEl.classList.remove("hidden");
+  statusEl.classList.add("fade-out");
+  requestAnimationFrame(() => {
+    statusEl.classList.remove("fade-out");
+  });
+  statusEl.textContent = text;
+  statusEl.style.color = color;
+}
+
+function resetAIStatus(statusEl, delay = 3000) {
+  if (!statusEl) return;
+  setTimeout(() => {
+    statusEl.classList.add("fade-out");
+    setTimeout(() => {
+      statusEl.classList.add("hidden");
+      statusEl.classList.remove("fade-out");
+      statusEl.textContent = "Ready";
+      statusEl.style.color = "";
+    }, 400);
+  }, delay);
+}
 
 function setupAI() {
   const organizeBtn = document.getElementById("ai-organize-btn");
@@ -2635,39 +2434,22 @@ function setupAI() {
       if (!preGroupingState) return;
 
       try {
-        statusEl.classList.remove('hidden');
-        statusEl.classList.add('fade-out');
-        requestAnimationFrame(() => {
-          statusEl.classList.remove('fade-out');
-        });
-        statusEl.textContent = "Undoing AI grouping...";
-        statusEl.style.color = "";
+        showAIStatus(statusEl, "Undoing AI grouping...");
 
         // Restore previous state
         await restoreTabState(preGroupingState);
 
-        statusEl.textContent = "Grouping undone!";
-        statusEl.style.color = "green";
+        showAIStatus(statusEl, "Grouping undone!", "green");
 
         // Hide undo button
         undoBtn.classList.add('hidden');
         preGroupingState = null;
 
-        setTimeout(() => {
-          statusEl.classList.add('fade-out');
-          setTimeout(() => {
-            statusEl.classList.add('hidden');
-            statusEl.classList.remove('fade-out');
-            statusEl.textContent = "Ready";
-            statusEl.style.color = "";
-          }, 400);
-        }, 2000);
-
-        fetchAndRenderTabs();
+        resetAIStatus(statusEl, 2000);
+        await fetchAndRenderTabs();
       } catch (err) {
         console.error("Undo failed", err);
-        statusEl.textContent = "Undo failed: " + err.message;
-        statusEl.style.color = "red";
+        showAIStatus(statusEl, "Undo failed: " + err.message, "red");
       }
     });
   }
@@ -2676,146 +2458,49 @@ function setupAI() {
     // Check if AI is enabled
     const { aiEnabled } = await chrome.storage.local.get({ aiEnabled: true });
     if (!aiEnabled) {
-      statusEl.classList.remove('hidden');
-      statusEl.classList.add('fade-out');
-      requestAnimationFrame(() => {
-        statusEl.classList.remove('fade-out');
-      });
-      statusEl.textContent = "AI features are disabled. Enable in settings.";
-      statusEl.style.color = "orange";
-      setTimeout(() => {
-        statusEl.classList.add('fade-out');
-        setTimeout(() => {
-          statusEl.classList.add('hidden');
-          statusEl.classList.remove('fade-out');
-          statusEl.textContent = "Ready";
-          statusEl.style.color = "";
-        }, 400);
-      }, 3000);
+      showAIStatus(statusEl, "AI features are disabled. Enable in settings.", "orange");
+      resetAIStatus(statusEl);
       return;
     }
 
-    // 1. Initialize Worker if needed
-    if (!aiWorker) {
-      aiWorker = new Worker("worker/ai-worker.js", { type: "module" });
+    try {
+      showAIStatus(statusEl, "Analyzing tabs...");
 
-      aiWorker.onmessage = async (e) => {
-        const { type, groups, error } = e.data;
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      const windowId = tabs[0]?.windowId ?? chrome.windows.WINDOW_ID_CURRENT;
+      preGroupingState = await captureTabState(tabs);
 
-        if (type === "GROUPS_GENERATED") {
-          statusEl.textContent = `Found ${Object.keys(groups).length} groups. Applying...`;
+      const response = await chrome.runtime.sendMessage({
+        type: "AI_ORGANIZE_TABS",
+        windowId,
+      });
 
-          try {
-            // Apply groups
-            for (const [groupName, tabIds] of Object.entries(groups)) {
-              if (tabIds.length < 2) continue; // Skip singles
-
-              // Create/Update group
-              const groupId = await chrome.tabs.group({ tabIds });
-              await chrome.tabGroups.update(groupId, {
-                title: groupName,
-                collapsed: true // Auto-collapse to save space
-              });
-            }
-
-            statusEl.textContent = "Done!";
-            statusEl.style.color = "green";
-
-            // Show undo button
-            if (undoBtn) undoBtn.classList.remove('hidden');
-
-            setTimeout(() => {
-              statusEl.classList.add('fade-out');
-              setTimeout(() => {
-                statusEl.classList.add('hidden');
-                statusEl.classList.remove('fade-out');
-                statusEl.textContent = "Ready";
-                statusEl.style.color = "";
-              }, 400);
-            }, 3000);
-
-            // Re-render
-            fetchAndRenderTabs();
-
-          } catch (err) {
-            console.error("Grouping failed", err);
-            statusEl.textContent = "Error applying groups.";
-            statusEl.style.color = "red";
-          }
-        } else if (type === "ERROR") {
-          console.error("AI Worker Error:", error);
-          statusEl.textContent = "AI Error: " + error;
-          statusEl.style.color = "red";
-        }
-      };
-
-      aiWorker.onerror = (err) => {
-        console.error("Worker connection failed", err);
-        statusEl.textContent = "Worker failed to start.";
-        statusEl.style.color = "red";
-      };
-    }
-
-    // 2. Prepare UI
-    statusEl.classList.remove('hidden');
-    statusEl.classList.add('fade-out');
-    requestAnimationFrame(() => {
-      statusEl.classList.remove('fade-out');
-    });
-    statusEl.textContent = "Analyzing tabs... (loading model)";
-    statusEl.style.color = "";
-
-    // 3. Get Tabs and save current state
-    const tabs = await chrome.tabs.query({ currentWindow: true });
-
-    // Save pre-grouping state
-    preGroupingState = await captureTabState(tabs);
-
-    // Filter out pinned tabs
-    const eligibleTabs = tabs.filter(t => !t.pinned).map(t => {
-      let url = t.url;
-      // Handle "The Marvellous Suspender" and similar extensions
-      if (url.startsWith('chrome-extension://') && url.includes('suspended.html')) {
-        try {
-          const urlObj = new URL(url);
-          const uri = urlObj.searchParams.get('uri') || urlObj.searchParams.get('url');
-          if (uri) {
-            url = uri;
-          } else {
-            // Try getting it from hash if param not present
-            const hash = urlObj.hash;
-            if (hash.includes('uri=')) {
-              const match = hash.match(/uri=([^&]+)/);
-              if (match) url = match[1];
-            }
-          }
-        } catch (e) {
-          console.warn("Failed to parse suspended URL", url);
-        }
+      if (!response?.ok) {
+        throw new Error(response?.error || "AI organize failed.");
       }
 
-      return {
-        id: t.id,
-        title: t.title,
-        url: url,
-        favIconUrl: t.favIconUrl
-      };
-    });
+      if (!response.groupsApplied) {
+        preGroupingState = null;
+        if (undoBtn) undoBtn.classList.add("hidden");
+        showAIStatus(statusEl, "No semantic groups found.", "orange");
+        resetAIStatus(statusEl);
+        return;
+      }
 
-    if (eligibleTabs.length === 0) {
-      statusEl.textContent = "No eligible tabs to sort.";
-      return;
+      if (undoBtn) undoBtn.classList.remove("hidden");
+      showAIStatus(
+        statusEl,
+        `Created ${response.groupsApplied} group${response.groupsApplied === 1 ? "" : "s"}.`,
+        "green",
+      );
+      resetAIStatus(statusEl);
+      await fetchAndRenderTabs();
+    } catch (err) {
+      console.error("AI organize failed", err);
+      preGroupingState = null;
+      if (undoBtn) undoBtn.classList.add("hidden");
+      showAIStatus(statusEl, "AI Error: " + err.message, "red");
     }
-
-    // 4. Send to Worker with hybrid mode (default)
-    const { groupingThreshold } = await chrome.storage.local.get({ groupingThreshold: 2 });
-
-    aiWorker.postMessage({
-      type: "SORT_TABS",
-      tabs: eligibleTabs,
-      mode: "hybrid", // Always use hybrid mode
-      groupingThreshold
-    });
   });
 }
 
@@ -2852,29 +2537,48 @@ async function captureTabState(tabs) {
 async function restoreTabState(state) {
   if (!state) return;
 
-  // First, ungroup all tabs that were ungrouped before
   const currentTabs = await chrome.tabs.query({ currentWindow: true });
+  const tabsById = new Map(currentTabs.map((tab) => [tab.id, tab]));
+  const originalTabs = state.tabs
+    .filter((tab) => tabsById.has(tab.id))
+    .sort((a, b) => a.index - b.index);
 
-  for (const tab of currentTabs) {
-    const originalTab = state.tabs.find(t => t.id === tab.id);
-    if (originalTab && originalTab.groupId === -1 && tab.groupId !== -1) {
-      // This tab should be ungrouped
-      await chrome.tabs.ungroup(tab.id);
+  // Reset existing AI-created grouping before recreating the original layout.
+  const currentlyGroupedTabIds = currentTabs
+    .filter((tab) => tab.groupId !== -1)
+    .map((tab) => tab.id);
+  if (currentlyGroupedTabIds.length > 0) {
+    await chrome.tabs.ungroup(currentlyGroupedTabIds);
+  }
+
+  // Restore original tab order when all saved tabs are still present.
+  const missingTabs = state.tabs.some((tab) => !tabsById.has(tab.id));
+  if (!missingTabs) {
+    for (const originalTab of originalTabs) {
+      const currentTab = tabsById.get(originalTab.id);
+      if (currentTab && currentTab.index !== originalTab.index) {
+        await chrome.tabs.move(originalTab.id, { index: originalTab.index });
+      }
     }
   }
 
-  // Remove any groups that were created by AI
-  const currentGroups = await chrome.tabGroups.query({ windowId: chrome.windows.WINDOW_ID_CURRENT });
-  const originalGroupIds = new Set(state.groups.map(g => g.id));
+  // Recreate original tab groups with their metadata.
+  const originalGroupsById = new Map(state.groups.map((group) => [group.id, group]));
+  for (const [originalGroupId, originalGroup] of originalGroupsById) {
+    const tabIds = originalTabs
+      .filter((tab) => tab.groupId === originalGroupId)
+      .map((tab) => tab.id);
 
-  for (const group of currentGroups) {
-    if (!originalGroupIds.has(group.id)) {
-      // This is a new group created by AI, ungroup its tabs
-      const groupTabs = await chrome.tabs.query({ groupId: group.id });
-      if (groupTabs.length > 0) {
-        await chrome.tabs.ungroup(groupTabs.map(t => t.id));
-      }
+    if (tabIds.length < 2) {
+      continue;
     }
+
+    const recreatedGroupId = await chrome.tabs.group({ tabIds });
+    await chrome.tabGroups.update(recreatedGroupId, {
+      title: originalGroup.title,
+      color: originalGroup.color,
+      collapsed: originalGroup.collapsed,
+    });
   }
 }
 
@@ -2929,6 +2633,16 @@ function initContextMenu() {
     }
   });
 
+  document.getElementById("ctx-nest-under")?.addEventListener("click", async () => {
+    if (contextMenuTabId) {
+      const childTabIds = getNestingCandidates(contextMenuTabId);
+      if (childTabIds.length > 0) {
+        await nestTabsUnderParent(contextMenuTabId, childTabIds);
+      }
+      hideContextMenu();
+    }
+  });
+
   document.getElementById("ctx-promote").addEventListener("click", async () => {
     if (contextMenuTabId) {
       // Remove from nested head -> Make it a root
@@ -2976,6 +2690,21 @@ function showContextMenu(e, tabId) {
   const muteText = document.getElementById("ctx-mute-text");
   if (muteText && tab) {
     muteText.textContent = tab.mutedInfo?.muted ? "Unmute Tab" : "Mute Tab";
+  }
+
+  // Toggle "Remove from Nested Head" visibility
+  const nestUnderBtn = document.getElementById("ctx-nest-under");
+  const nestingCandidates = getNestingCandidates(tabId);
+  if (nestUnderBtn) {
+    if (nestingCandidates.length > 0) {
+      nestUnderBtn.style.display = "flex";
+      nestUnderBtn.textContent =
+        nestingCandidates.length === 1
+          ? "Nest 1 Selected Tab Under This Tab"
+          : `Nest ${nestingCandidates.length} Selected Tabs Under This Tab`;
+    } else {
+      nestUnderBtn.style.display = "none";
+    }
   }
 
   // Toggle "Remove from Nested Head" visibility
