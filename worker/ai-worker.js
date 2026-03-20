@@ -64,10 +64,54 @@ self.addEventListener('message', async (event) => {
     let step = 'init';
     try {
       step = 'preprocessing';
-      const cleanTitle = (title) => title.replace(/\b(Google|GitHub|YouTube|Amazon|Stack Overflow|Reddit|Search)\b/gi, '').trim();
+
+      // URL content extractor — extracts search queries and clean pathnames to avoid domain dominance
+      function extractEmbedInput(tab) {
+          let cleanedURL = "";
+          try {
+              const url = new URL(tab.url);
+              const path = url.pathname;
+              const searchParams = url.searchParams;
+
+              // 1. Extract search query if present
+              const searchQuery =
+                  searchParams.get("q") ||
+                  searchParams.get("query") ||
+                  searchParams.get("search");
+
+              if (searchQuery) {
+                  cleanedURL = searchQuery;
+              } else if (path && path !== "/" && path !== "") {
+                  // 2. Clean pathname: strip extensions, replace separators with spaces, remove numeric IDs
+                  cleanedURL = path
+                      .replace(/\.[^./]+$/, "")          // Strip file extensions (.html, .php, etc.)
+                      .replace(/[_\-./]/g, " ")          // Replace separators with spaces
+                      .replace(/\b\d+\b/g, "")           // Remove numeric IDs
+                      .replace(/\s+/g, " ")              // Normalize spaces
+                      .trim();
+              }
+          } catch (e) {
+              // Invalid URL, fall through
+          }
+
+          // 3. Combine: URL content (weighted toward) + title
+          const title = tab.title
+              .replace(/\b(Google|GitHub|YouTube|Amazon|Stack Overflow|Reddit|Search)\b/gi, '')
+              .trim()
+              .substring(0, 100);
+
+          if (!cleanedURL) {
+              return title || tab.title.substring(0, 100);
+          }
+          if (!title) {
+              return cleanedURL.substring(0, 100);
+          }
+          // Weight URL content slightly higher to dominate domain
+          return (cleanedURL + " " + title).substring(0, 100);
+      }
 
       // Prepare inputs for embedding
-      const inputs = tabs.map(t => cleanTitle(t.title).substring(0, 100));
+      const inputs = tabs.map(t => extractEmbedInput(t));
 
       step = 'inference';
       // Run inference with all-MiniLM-L6-v2 (faster, lighter model)

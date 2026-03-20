@@ -98,6 +98,45 @@ export class TabGrouper {
             }
         }
 
+        // PHASE 3: Orphan Rescue — attach stray tabs to existing groups via centroid similarity
+        if (validGroups.length > 0) {
+            const orphanTabs = richTabs.filter(t => !assignedIds.has(t.id));
+            if (orphanTabs.length > 0) {
+                // Compute centroids for each existing group
+                const groupCentroids = validGroups.map(g => {
+                    const members = g.members.map(id => richTabs.find(t => t.id === id)).filter(Boolean);
+                    const centroid = new Array(members[0].embedding.length).fill(0);
+                    members.forEach(m => {
+                        for (let k = 0; k < centroid.length; k++) {
+                            centroid[k] += m.embedding[k];
+                        }
+                    });
+                    for (let k = 0; k < centroid.length; k++) {
+                        centroid[k] /= members.length;
+                    }
+                    return { group: g, centroid };
+                });
+
+                // For each orphan, find best centroid match
+                for (const orphan of orphanTabs) {
+                    let bestScore = -1;
+                    let bestGroup = null;
+                    for (const { group, centroid } of groupCentroids) {
+                        const score = this.cosineSimilarity(orphan.embedding, centroid);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestGroup = group;
+                        }
+                    }
+                    if (bestScore > 0.55) {
+                        bestGroup.members.push(orphan.id);
+                        bestGroup.confidence = Math.min(1.0, bestGroup.confidence + 0.02);
+                        assignedIds.add(orphan.id);
+                    }
+                }
+            }
+        }
+
         const ungrouped = richTabs.filter(t => !assignedIds.has(t.id)).map(t => t.id);
         return { groups: validGroups, ungrouped };
     }
@@ -483,10 +522,15 @@ export class TabGrouper {
             // Proximity coherence: tabs close together get higher scores
             const proximityCoherence = Math.max(0.5, 1.0 - (indexSpan / 20));
 
+            // Normalized weights that sum to 1.0 (applied only here; buildSimilarityGraph uses config weights)
+            const CONFIDENCE_WEIGHT_SEMANTIC = 0.6;
+            const CONFIDENCE_WEIGHT_TIME = 0.2;
+            const CONFIDENCE_WEIGHT_PROXIMITY = 0.2;
+
             let confidence =
-                (this.config.weights.semantic * avgSim) +
-                (this.config.weights.time * timeCoherence) +
-                (this.config.weights.proximity * proximityCoherence);
+                (CONFIDENCE_WEIGHT_SEMANTIC * avgSim) +
+                (CONFIDENCE_WEIGHT_TIME * timeCoherence) +
+                (CONFIDENCE_WEIGHT_PROXIMITY * proximityCoherence);
 
             // Affinity Bonus for complete workflows (search + docs)
             if (hasReference && hasExploration) {
