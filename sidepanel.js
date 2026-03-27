@@ -14,6 +14,7 @@ let pendingScrollTabId = null;
 let selectedTabs = new Set(); // Set of tabIds that are currently selected
 let lastClickedTabId = null; // Anchor tab for shift-select range
 let isInitialRender = true;
+let currentGroupsMap = new Map();
 
 const tabsListEl = document.getElementById("tabs-list");
 const searchInput = document.getElementById("tab-search");
@@ -246,6 +247,7 @@ async function fetchAndRenderTabs() {
   });
   const groupsMap = new Map();
   groups.forEach((g) => groupsMap.set(g.id, g));
+  currentGroupsMap = groupsMap;
 
   buildTree(tabs, groupsMap);
   renderTree(groupsMap);
@@ -361,7 +363,7 @@ function buildTree(tabs, groupsMap) {
 
 // --- Rendering ---
 
-function renderTree(groupsMap) {
+function renderTree(groupsMap = currentGroupsMap) {
   tabsListEl.innerHTML = "";
 
   // Filtered mode? (If searching)
@@ -783,9 +785,8 @@ async function toggleCollapse(tabId) {
   fetchAndRenderTabs(); // Re-render to update UI
 }
 
-function handleSearch(e) {
-  const val = e.target.value;
-  renderTree(val);
+function handleSearch() {
+  renderTree();
 }
 
 // --- Event Handlers ---
