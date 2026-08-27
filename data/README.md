@@ -29,5 +29,14 @@ data. It creates two ignored Studio-ready JSONL files with only plain-text
 The text is transformed with the same URL/title cleanup that ZenTree uses at
 runtime, so the model learns from the inputs it will actually see.
 
+To run the actual embedding trainer on the A100, install torch,
+sentence-transformers, and datasets there, then run
+python3 scripts/train_minilm_triplets.py.
+
+This is deliberately not the Studio chat-training page: it uses
+CachedMultipleNegativesRankingLoss, which consumes all three columns as an
+embedding triplet. It evaluates against the held-out test file after the epoch
+and saves the resulting model under outputs/.
+
 This is a local research bootstrap, not a publishable ZenTree dataset. Verify
 each upstream source's terms before sharing derived rows.
