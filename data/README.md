@@ -1,0 +1,33 @@
+# Public session bootstrap data
+
+Run `python3 scripts/build_public_session_triplets.py` to create the ignored
+`data/public_session_triplets.jsonl` file.
+
+The builder downloads two public research sources at runtime rather than
+committing their contents here:
+
+- [TREC 2012 Session Track](https://trec.nist.gov/data/session/12/sessiontrack2012.txt):
+  real human search sessions with queries, result titles/URLs, and clicked
+  results. A clicked result is the `positive`; a clicked result from another
+  task is the `negative`.
+- [UMass Task-Aware Query Recommendation](https://ciir.cs.umass.edu/downloads/task-aware-query-recommendation/):
+  TREC-session query contexts with explicit same-task and off-task markers.
+  Its off-task query is the `negative`.
+
+Each row is an `anchor`, `positive`, `negative` triplet. The positive is
+within the same research task; the negative is from a distinct task or is
+explicitly marked off-task. `source`, `session_id`, `task_id`, and `split`
+preserve provenance and prevent task leakage during evaluation.
+
+Run `python3 scripts/prepare_minilm_triplets.py` after building the source
+data. It creates two ignored Studio-ready JSONL files with only plain-text
+`anchor`, `positive`, and `negative` fields:
+
+- `data/minilm_tab_triplets_train.jsonl` — use for training.
+- `data/minilm_tab_triplets_test.jsonl` — keep separate for evaluation.
+
+The text is transformed with the same URL/title cleanup that ZenTree uses at
+runtime, so the model learns from the inputs it will actually see.
+
+This is a local research bootstrap, not a publishable ZenTree dataset. Verify
+each upstream source's terms before sharing derived rows.
