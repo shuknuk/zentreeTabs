@@ -9,10 +9,12 @@ import io
 import json
 import random
 import re
-import urllib.request
-import xml.etree.ElementTree as ET
+import urllib.parse
 from collections import defaultdict
 from pathlib import Path
+
+import defusedxml.ElementTree as ET
+import requests
 
 
 TREC_2012_URL = "https://trec.nist.gov/data/session/12/sessiontrack2012.txt"
@@ -23,9 +25,11 @@ RANDOM = random.Random(42)
 
 
 def fetch(url: str) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": "ZenTreeTabs dataset builder"})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return response.read()
+    if urllib.parse.urlparse(url).scheme != "https":
+        raise ValueError(f"Refusing to fetch non-https URL: {url}")
+    response = requests.get(url, headers={"User-Agent": "ZenTreeTabs dataset builder"}, timeout=60)
+    response.raise_for_status()
+    return response.content
 
 
 def split_for(task_id: str) -> str:
