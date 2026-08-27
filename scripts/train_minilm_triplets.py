@@ -57,7 +57,12 @@ def main() -> None:
         batch_sampler=BatchSamplers.NO_DUPLICATES,
         report_to="none",
     )
-    evaluator = TripletEvaluator(name="tab_grouping_test", **eval_texts)
+    evaluator = TripletEvaluator(
+        anchors=eval_texts["anchor"],
+        positives=eval_texts["positive"],
+        negatives=eval_texts["negative"],
+        name="tab_grouping_test",
+    )
     trainer = SentenceTransformerTrainer(
         model=model,
         args=training_args,
