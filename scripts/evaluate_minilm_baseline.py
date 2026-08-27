@@ -40,6 +40,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--model", default="sentence-transformers/all-MiniLM-L6-v2")
     args = parser.parse_args()
 
     rows = [json.loads(line) for line in args.dataset.open() if json.loads(line)["split"] == "test"]
@@ -47,9 +48,10 @@ def main() -> None:
         raise ValueError("No test rows found")
 
     texts = [embed_input(row[role]) for row in rows for role in ("anchor", "positive", "negative")]
-    model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    model = SentenceTransformer(args.model)
     vectors = model.encode(texts, batch_size=args.batch_size, normalize_embeddings=True, show_progress_bar=True)
 
+    print(f"model: {args.model}")
     scores = defaultdict(list)
     for index, row in enumerate(rows):
         anchor, positive, negative = vectors[index * 3:index * 3 + 3]
