@@ -40,3 +40,18 @@ and saves the resulting model under outputs/.
 
 This is a local research bootstrap, not a publishable ZenTree dataset. Verify
 each upstream source's terms before sharing derived rows.
+
+## Mozilla history-search experiment
+
+`python3 scripts/build_mozilla_history_triplets.py` builds a separate ignored
+source file at `data/mozilla_history_triplets.jsonl` from Mozilla's synthetic
+history-search dataset. Its anchor is a search tab, its positive is a relevant
+history page, and its negative is another page from the same synthetic profile.
+
+Keep this separate from the public-session bootstrap data. These are useful
+weak labels for a controlled experiment in history/search relevance; they are
+not labels saying that two real Chrome tabs belonged in the same tab group.
+
+Prepare it for the embedding trainer with:
+
+    python3 scripts/prepare_minilm_triplets.py --source data/mozilla_history_triplets.jsonl --train-output data/mozilla_history_triplets_train.jsonl --test-output data/mozilla_history_triplets_test.jsonl

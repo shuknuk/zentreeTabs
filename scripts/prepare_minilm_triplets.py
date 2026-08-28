@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 from pathlib import Path
@@ -32,15 +33,24 @@ def embed_input(tab: dict[str, str]) -> str:
 
 
 def main() -> None:
-    if not SOURCE.exists():
-        raise FileNotFoundError(f"Run scripts/build_public_session_triplets.py first: {SOURCE}")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", type=Path, default=SOURCE)
+    parser.add_argument("--train-output", type=Path, default=OUTPUTS["train"])
+    parser.add_argument("--test-output", type=Path, default=OUTPUTS["test"])
+    args = parser.parse_args()
+    outputs = {"train": args.train_output, "test": args.test_output}
 
-    handles = {split: path.open("w") for split, path in OUTPUTS.items()}
-    counts = {split: 0 for split in OUTPUTS}
+    if not args.source.exists():
+        raise FileNotFoundError(f"Source triplets not found: {args.source}")
+
+    handles = {split: path.open("w") for split, path in outputs.items()}
+    counts = {split: 0 for split in outputs}
     try:
-        for line in SOURCE.open():
+        for line in args.source.open():
             row = json.loads(line)
             split = row["split"]
+            if split not in handles:
+                raise ValueError(f"Unsupported split {split!r} in {args.source}")
             flat = {role: embed_input(row[role]) for role in ("anchor", "positive", "negative")}
             handles[split].write(json.dumps(flat) + "\n")
             counts[split] += 1
@@ -49,7 +59,7 @@ def main() -> None:
             handle.close()
 
     for split, count in counts.items():
-        print(f"Wrote {count:,} {split} triplets to {OUTPUTS[split]}")
+        print(f"Wrote {count:,} {split} triplets to {outputs[split]}")
 
 
 if __name__ == "__main__":
